@@ -41,8 +41,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="&quot;$(ZMQ3_DIR)\include&quot;;&quot;$(LUA_DIR)\include&quot;;&quot;$(CPPLIB_DIR)\msvc&quot;"
-				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;LUAZMQ_EXPORTS;LUAZMQ_USE_SEND_AS_BUF"
+				AdditionalIncludeDirectories="&quot;$(ZMQ4_DIR)\include&quot;;&quot;$(LUA_DIR)\include&quot;;&quot;$(CPPLIB_DIR)\msvc&quot;"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;LUAZMQ_EXPORTS;LUAZMQ_USE_SEND_AS_BUF;LUAZMQ_DEBUG"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -61,10 +61,10 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="libzmq3.lib lua5.1.lib"
+				AdditionalDependencies="libzmq.lib lua5.1.lib"
 				OutputFile="$(OutDir)\lzmq.dll"
 				LinkIncremental="2"
-				AdditionalLibraryDirectories="$(ZMQ3_DIR)\lib;&quot;$(LUA_DIR)\lib&quot;"
+				AdditionalLibraryDirectories="$(ZMQ4_DIR)\lib;&quot;$(LUA_DIR)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				TargetMachine="1"

@@ -56,6 +56,11 @@ local table  = require "table"
 
 local _M = {}
 
+local function rfill(str, wdt, ch)
+  if wdt > #str then str = str .. (ch or ' '):rep(wdt - #str) end
+  return str
+end
+
 local function printformat(format, ...)
   io.write( string.format(format, ...) )
 end
@@ -94,12 +99,12 @@ function _M.begin()
 end
 
 function _M.run(testcasename, testname)
-  io.write(testcasename, '.', testname) io.flush()
+  io.write(rfill(testcasename .. '.' .. testname, 70)) io.flush()
 end
 
 function _M.err(fullname, message, traceback)
   io.write(" - error!\n")
-  io.write("Error! ("..fullname.."):\n"..message.."\n\t"..table.concat(traceback, "\n\t") .. "\n")
+  io.write("Error! ("..fullname.."):\n"..message.."\n\t"..table.concat(traceback, "\n\t"), "\n")
 end
 
 function _M.fail(fullname, where, message, usermessage)
@@ -108,9 +113,8 @@ function _M.fail(fullname, where, message, usermessage)
 end
 
 function _M.skip(fullname, where, message, usermessage)
-  writestatus("S")
-  local text = string.format("Skip (%s): %s\n%s: %s", fullname, usermessage or "", where, message)
-  msgs[#msgs+1] = text
+  io.write(" - skip!\n")
+  io.write(string.format("Skip (%s): %s\n%s: %s", fullname, usermessage or "", where, message), "\n")
 end
 
 function _M.pass(testcasename, testname)

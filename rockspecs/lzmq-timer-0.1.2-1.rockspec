@@ -1,18 +1,10 @@
--- This file was automatically generated for the LuaDist project.
-
 package = "lzmq-timer"
 version = "0.1.2-1"
 
--- LuaDist source
 source = {
-  tag = "0.1.2-1",
-  url = "git://github.com/LuaDist-testing/lzmq-timer.git"
+  url = "https://github.com/moteus/lzmq/archive/v0.1.2.zip",
+  dir = "lzmq-0.1.2",
 }
--- Original source
--- source = {
---   url = "https://github.com/moteus/lzmq/archive/v0.1.2.zip",
---   dir = "lzmq-0.1.2",
--- }
 
 description = {
   summary = "Lua bindings to ZeroMQ 3",

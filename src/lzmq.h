@@ -1,6 +1,7 @@
 #ifndef _LZMQ_H_
 #define _LZMQ_H_
 #include "lua.h"
+
 #include "zmq.h"
 
 #if defined (_WIN32) || defined (_WINDOWS)
@@ -13,20 +14,27 @@
 #  define LUAZMQ_EXPORT
 #endif
 
+#ifndef LZMQ_SOCKET_COUNT
+#  define LZMQ_SOCKET_COUNT 1
+#endif
+
+#ifndef LZMQ_AUTOCLOSE_SOCKET
+#  define LZMQ_AUTOCLOSE_SOCKET 1
+#endif
 
 #define LUAZMQ_PREFIX  "LuaZMQ3: "
 
 typedef unsigned char uchar;
-#define LUAZMQ_FLAG_CLOSED       (uchar)0x01
+#define LUAZMQ_FLAG_CLOSED       (uchar)(0x01 << 0)
 /*context only*/
-#define LUAZMQ_FLAG_DONT_DESTROY (uchar)0x02
-/*socket only*/
-#define LUAZMQ_FLAG_MORE         (uchar)0x02
+#define LUAZMQ_FLAG_CTX_SHUTDOWN (uchar)(0x01 << 1)
+#define LUAZMQ_FLAG_DONT_DESTROY (uchar)(0x01 << 2)
+#define LUAZMQ_FLAG_MORE         (uchar)(0x01 << 3)
 
 typedef struct{
   void  *ctx;
   uchar flags;
-#ifdef LZMQ_DEBUG
+#if LZMQ_SOCKET_COUNT
   int socket_count;
 #endif
   int autoclose_ref;
@@ -35,9 +43,10 @@ typedef struct{
 typedef struct{
   void  *skt;
   uchar flags;
-#ifdef LZMQ_DEBUG
+#if LZMQ_SOCKET_COUNT
   zcontext *ctx;
 #endif
+  int ctx_ref;
   int onclose_ref;
 } zsocket;
 
@@ -88,6 +97,12 @@ int luazmq_fail_no(lua_State *L, zsocket *skt);
 #  define luazmq_fail luazmq_fail_str
 #else /* default */
 #  define luazmq_fail luazmq_fail_no
+#endif
+
+#ifdef LUAZMQ_USE_LUA_REGISTRY
+#  define LUAZMQ_LUA_REGISTRY LUA_REGISTRYINDEX
+#else
+#  define LUAZMQ_LUA_REGISTRY lua_upvalueindex(1)
 #endif
 
 int luazmq_allocfail(lua_State *L);

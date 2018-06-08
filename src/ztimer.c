@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <float.h>
 
+/* Select default timer source if not defined
+ */
 #if defined(__WINDOWS__) 
 
 #include <Windows.h>
@@ -16,8 +18,23 @@
 #endif
 
 #else
-// USE_GETTIMEOFDAY
-// USE_CLOCK_MONOTONIC
+
+#include <sys/time.h>
+#define USE_GETTIMEOFDAY
+
+#if defined(__MACH__)
+
+#include <mach/clock.h>
+#include <mach/mach.h>
+
+#define USE_CLOCK_GET_TIME
+
+#elif defined(CLOCK_MONOTONIC)
+
+#define USE_CLOCK_MONOTONIC
+
+#endif
+
 #endif
 
 #define LUAZMQ_PREFIX  "LuaZMQ3: "
@@ -82,10 +99,14 @@ static monotonic_time_t IncMonotonic(monotonic_time_t StartTime, monotonic_diff_
 
 static LARGE_INTEGER PerfFreq;
 
+static volatile int PerfFreqInit = 0;
+
 typedef uint64_t monotonic_time_t;
 typedef int64_t  monotonic_diff_t;
 
 static void InitMonotonicTimer(){
+  if(PerfFreqInit) return;
+  PerfFreqInit = 1;
   QueryPerformanceFrequency(&PerfFreq);
   PerfFreq.QuadPart /= 1000;
 }
@@ -123,8 +144,6 @@ static absolute_diff_t GetUtcDelta(absolute_time_t StartTime, absolute_time_t En
 
 #else // not __WINDOWS__
 
-#include <sys/time.h>
-
 typedef uint64_t absolute_time_t;
 typedef int64_t  absolute_diff_t;
 typedef uint64_t monotonic_time_t;
@@ -147,6 +166,18 @@ static monotonic_time_t GetMonotonicTime(){
   if(0 == clock_gettime(CLOCK_MONOTONIC, &ts))
     return (monotonic_time_t)ts.tv_sec * 1000 + (monotonic_time_t)ts.tv_nsec / 1000000;
 #endif
+
+#ifdef USE_CLOCK_GET_TIME
+  clock_serv_t cclock;
+  kern_return_t ret = host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
+  if(ret == KERN_SUCCESS){
+    mach_timespec_t ts;
+    clock_get_time(cclock, &ts);
+    mach_port_deallocate(mach_task_self(), cclock);
+    return (monotonic_time_t)ts.tv_sec * 1000 + (monotonic_time_t)ts.tv_nsec / 1000000;
+  }
+#endif
+
   return GetUtcTime();
 }
 
@@ -562,21 +593,10 @@ static const struct luaL_Reg luazmq_abstimer_methods[] = {
   {NULL,NULL}
 };
 
-void luazmq_timer_initlib(lua_State *L){
-  InitMonotonicTimer();
-  luazmq_createmeta(L, LUAZMQ_MONOTONIC_TIMER,  luazmq_montimer_methods);
-  luazmq_createmeta(L, LUAZMQ_ABSULUTE_TIMER,   luazmq_abstimer_methods);
-  lua_pop(L, 2);
-
-  lua_newtable(L);
-  luazmq_setfuncs(L, luazmq_timerlib, 0);
-  lua_setfield(L,-2, "timer");
-}
-
 LUAZMQ_TIMER_EXPORT int luaopen_lzmq_timer (lua_State *L){
   InitMonotonicTimer();
-  luazmq_createmeta(L, LUAZMQ_MONOTONIC_TIMER,  luazmq_montimer_methods);
-  luazmq_createmeta(L, LUAZMQ_ABSULUTE_TIMER,   luazmq_abstimer_methods);
+  luazmq_createmeta(L, LUAZMQ_MONOTONIC_TIMER,  luazmq_montimer_methods, 0);
+  luazmq_createmeta(L, LUAZMQ_ABSULUTE_TIMER,   luazmq_abstimer_methods, 0);
   lua_pop(L, 2);
 
   lua_newtable(L);

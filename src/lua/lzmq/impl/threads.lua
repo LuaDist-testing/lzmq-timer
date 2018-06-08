@@ -22,19 +22,45 @@
 -- zmq.thread wraps the low-level threads object & a zmq context.
 --
 
-local zmq = require"lzmq"
-local Threads = require"llthreads.ex"
+local function rand_bytes(n)
+	local t = {}
+	for i = 1, n do table.insert(t, string.char(math.random(256)-1)) end
+	return table.concat(t)
+end
+
+local string  = require"string"
+local Threads = require"lzmq.llthreads.ex"
+return function(ZMQ_NAME)
+
+local zmq = require(ZMQ_NAME)
 
 local zthreads_prelude = [[
-local zmq = require"lzmq"
-local zthreads = require"lzmq.threads"
+local zmq = require(]] .. ("%q"):format(ZMQ_NAME) .. [[)
+local zthreads = require(]] .. ("%q"):format(ZMQ_NAME) .. [[ .. ".threads")
 local parent_ctx = arg[1]
 if parent_ctx then zthreads.set_parent_ctx(zmq.init_ctx(parent_ctx)) end
 local unpack = table.unpack or unpack
-arg = { select(2, unpack(arg)) }
+arg = {n = arg.n - 1, unpack(arg, 2, arg.n) }
+]]
+
+local fork_prelude = [[
+arg[1] = zmq.assert(zthreads.get_parent_ctx():socket(zmq.PAIR,{
+	connect = assert(arg[1]);
+}))
 ]]
 
 local prelude = zthreads_prelude
+
+local function make_pipe(ctx)
+	local pipe = ctx:socket(zmq.PAIR)
+	local pipe_endpoint = "inproc://lzmq.pipe." .. pipe:fd() .. "." .. rand_bytes(10);
+	local ok, err = pipe:bind(pipe_endpoint)
+	if not ok then 
+		pipe:close()
+		return nil, err
+	end
+	return pipe, pipe_endpoint
+end
 
 local M = {}
 
@@ -52,6 +78,44 @@ function M.runstring(ctx, code, ...)
 	return Threads.runstring_ex(prelude, code, ctx, ...)
 end
 
+function M.run(ctx, code, ...)
+	if string.sub(code, 1, 1) == '@' then
+		return M.runfile(ctx, string.sub(code, 2), ...)
+	end
+	return M.runstring(ctx, code, ...)
+end
+
+function M.forkstring(ctx, code, ...)
+	local pipe, endpoint = make_pipe(ctx)
+	if not pipe then return nil, endpoint end
+	ctx = ctx:lightuserdata()
+	local ok, err = Threads.runstring_ex(prelude .. fork_prelude, code, ctx, endpoint, ...)
+	if not ok then
+		pipe:close()
+		return nil, err
+	end
+	return ok, pipe
+end
+
+function M.forkfile(ctx, file, ...)
+	local pipe, endpoint = make_pipe(ctx)
+	if not pipe then return nil, endpoint end
+	ctx = ctx:lightuserdata()
+	local ok, err = Threads.runfile_ex(prelude .. fork_prelude, file, ctx, endpoint, ...)
+	if not ok then
+		pipe:close()
+		return nil, err
+	end
+	return ok, pipe
+end
+
+function M.fork(ctx, code, ...)
+	if string.sub(code, 1, 1) == '@' then
+		return M.forkfile(ctx, string.sub(code, 2), ...)
+	end
+	return M.forkstring(ctx, code, ...)
+end
+
 local parent_ctx = nil
 function M.set_parent_ctx(ctx)
 	parent_ctx = ctx
@@ -62,3 +126,5 @@ function M.get_parent_ctx(ctx)
 end
 
 return M
+
+end

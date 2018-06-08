@@ -8,29 +8,19 @@ local function iszvereq(zmq, mi, ma, bu)
   return (mi == version[1]) and (ma == version[2]) and (bu == version[3])
 end
 
-print("------------------------------------")
-print("Lua version: " .. (_G.jit and _G.jit.version or _G._VERSION))
-print("ZQM version: " .. zversion(require"lzmq"))
-print("------------------------------------")
-print("")
-
 local HAS_RUNNER = not not lunit 
 
-local lunit    = require "lunit"
--- @fix in lunit:
---  return multiple values from assert_XXX
---  implement assert_ge/le methods 
+local lunit      = require "lunit"
+local TEST_CASE  = assert(lunit.TEST_CASE)
+local skip       = lunit.skip or function() end
+local SKIP       = function(msg) return function() return skip(msg) end end
 
-local skip     = function (msg) return function() lunit.fail("#SKIP: " .. msg) end end
 local IS_LUA52 = _VERSION >= 'Lua 5.2'
+local TEST_FFI = ("ffi" == os.getenv("LZMQ"))
 
-local TEST_CASE = function (name)
-  if not IS_LUA52 then
-    module(name, package.seeall, lunit.testcase)
-    setfenv(2, _M)
-  else
-    return lunit.module(name, 'seeall')
-  end
+-- value >= expected
+local function ge(expected, value)
+  return (value >= expected), value .. " less then " .. expected
 end
 
 local function weak_ptr(val)
@@ -42,9 +32,46 @@ local function gc_collect()
   collectgarbage("collect")
 end
 
-local zmq    = require "lzmq"
-local ztimer = require "lzmq.timer"
-local zloop  = require "lzmq.loop"
+local LZMQ = "lzmq" .. (TEST_FFI and ".ffi" or "")
+
+local zmq    = require (LZMQ)
+local ztimer = require (LZMQ .. ".timer" )
+local zloop  = require (LZMQ .. ".loop"  )
+local zpoller= require (LZMQ .. ".poller")
+
+print("------------------------------------")
+print("Lua version: " .. (_G.jit and _G.jit.version or _G._VERSION))
+print("ZQM version: " .. zversion(zmq))
+print("------------------------------------")
+print("")
+
+
+local function is_object(o, ...)
+  if o == nil then return o, ... end
+  local flag = (type(o) == 'table') or (type(o) == 'userdata')
+  if not flag then return nil, '`' .. tostring(o) .. '` is not object' end
+  return o, ...
+end
+local is_zmessage    = is_object
+local is_zsocket     = is_object
+local is_zcontext    = is_object
+local is_zcontext_ud = function(o, ...)
+  if o == nil then return o, ... end
+  local flag = (type(o) == 'number') or (type(o) == 'userdata') or (type(o) == 'string')
+  if not flag then return nil, '`' .. tostring(o) .. '` is not zma.context.userdata' end
+  return o, ...
+end
+
+local function error_is(err, no)
+  local msg = "expected `" .. tostring(zmq.error(no)) .. "` but was `" .. tostring(err) .. "`"
+  if type(err) == 'number' then
+    return err == no, msg
+  end
+  if type(err) == 'string' then
+    return not not string.find(err, tostring(no), nil, true), msg
+  end
+  return err:no() == no, msg
+end
 
 -- usage assert_equal(socket_count(ctx, 1))
 local function socket_count(ctx, hint)
@@ -60,7 +87,7 @@ end
 
 local ECHO_ADDR = "inproc://echo"
 
-local _ENV = TEST_CASE'interface'         if true then
+local _ENV = TEST_CASE'interface'            if true then
 
 function setup() end
 
@@ -71,6 +98,11 @@ function test_constant()
     assert_number(zmq.SNDMORE                        )
     assert_number(zmq.DONTWAIT                       )
     if zmq.NOBLOCK then assert_number(zmq.NOBLOCK    ) end
+  end
+  do -- poller
+    assert_number(zmq.POLLIN                         )
+    assert_number(zmq.POLLOUT                        )
+    assert_number(zmq.POLLERR                        )
   end
   do -- socket opt
     assert_number(zmq.AFFINITY                       )
@@ -115,71 +147,35 @@ function test_constant()
   do -- errors
     assert_table(zmq.errors)
     for _, Z in ipairs{zmq, zmq.errors} do
-      assert_number( Z.EPERM                )
-      assert_number( Z.ENOENT               )
-      assert_number( Z.ESRCH                )
-      assert_number( Z.EINTR                )
-      assert_number( Z.EIO                  )
-      assert_number( Z.ENXIO                )
-      assert_number( Z.E2BIG                )
-      assert_number( Z.ENOEXEC              )
-      assert_number( Z.EBADF                )
-      assert_number( Z.ECHILD               )
-      assert_number( Z.EAGAIN               )
-      assert_number( Z.ENOMEM               )
-      assert_number( Z.EACCES               )
-      assert_number( Z.EFAULT               )
-      assert_number( Z.EBUSY                )
-      assert_number( Z.EEXIST               )
-      assert_number( Z.EXDEV                )
-      assert_number( Z.ENODEV               )
-      assert_number( Z.ENOTDIR              )
-      assert_number( Z.EISDIR               )
-      assert_number( Z.ENFILE               )
-      assert_number( Z.EMFILE               )
-      assert_number( Z.ENOTTY               )
-      assert_number( Z.EFBIG                )
-      assert_number( Z.ENOSPC               )
-      assert_number( Z.ESPIPE               )
-      assert_number( Z.EROFS                )
-      assert_number( Z.EMLINK               )
-      assert_number( Z.EPIPE                )
-      assert_number( Z.EDOM                 )
-      assert_number( Z.EDEADLK              )
-      assert_number( Z.ENAMETOOLONG         )
-      assert_number( Z.ENOLCK               )
-      assert_number( Z.ENOSYS               )
-      assert_number( Z.ENOTEMPTY            )
-      assert_number( Z.EINVAL               )
-      assert_number( Z.ERANGE               )
-      assert_number( Z.EILSEQ               )
-      assert_number( Z.ENOTSUP              )
-      assert_number( Z.EPROTONOSUPPORT      )
-      assert_number( Z.ENOBUFS              )
-      assert_number( Z.ENETDOWN             )
-      assert_number( Z.EADDRINUSE           )
-      assert_number( Z.EADDRNOTAVAIL        )
-      assert_number( Z.ECONNREFUSED         )
-      assert_number( Z.EINPROGRESS          )
-      assert_number( Z.ENOTSOCK             )
-      assert_number( Z.EMSGSIZE             )
-      assert_number( Z.EAFNOSUPPORT         )
-      assert_number( Z.ENETUNREACH          )
-      assert_number( Z.ECONNABORTED         )
-      assert_number( Z.ECONNRESET           )
-      assert_number( Z.ENOTCONN             )
-      assert_number( Z.ETIMEDOUT            )
-      assert_number( Z.EHOSTUNREACH         )
-      assert_number( Z.ENETRESET            )
-      assert_number( Z.EFSM                 )
-      assert_number( Z.ENOCOMPATPROTO       )
-      assert_number( Z.ETERM                )
-      assert_number( Z.EMTHREAD             )
+      assert_number( Z.EFSM             )
+      assert_number( Z.ENOCOMPATPROTO   )
+      assert_number( Z.ETERM            )
+      assert_number( Z.EMTHREAD         )
+      assert_number( Z.EAGAIN           )
+      assert_number( Z.EINVAL           )
+      assert_number( Z.EHOSTUNREACH     )
+      assert_number( Z.ENOTSOCK         )
+      assert_number( Z.ENETDOWN         )
+      assert_number( Z.EPROTONOSUPPORT  )
+      assert_number( Z.ENOBUFS          )
+      assert_number( Z.ENETUNREACH      )
+      assert_number( Z.ENOTSUP          )
+      assert_number( Z.ETIMEDOUT        )
+      assert_number( Z.EADDRNOTAVAIL    )
+      assert_number( Z.EADDRINUSE       )
+      assert_number( Z.ECONNABORTED     )
+      assert_number( Z.EAFNOSUPPORT     )
+      assert_number( Z.ECONNREFUSED     )
+      assert_number( Z.ENOTCONN         )
+      assert_number( Z.EINPROGRESS      )
+      assert_number( Z.ECONNRESET       )
+      assert_number( Z.EMSGSIZE         )
     end
   end
 end
 
 function test_assert()
+  local msg = zmq.strerror(zmq.errors.EINVAL)
   local ok1, msg1 = pcall(zmq.assert, false, zmq.error(zmq.errors.EINVAL));    -- object
   local ok2, msg2 = pcall(zmq.assert, false, zmq.errors.EINVAL);               -- number
   local ok3, msg3 = pcall(zmq.assert, false, zmq.strerror(zmq.errors.EINVAL)); -- string
@@ -187,8 +183,11 @@ function test_assert()
   assert_false(ok2)
   assert_false(ok3)
   assert_string(msg1)
-  assert_equal(msg1, msg2)
-  assert_equal(msg1, msg3)
+  assert_string(msg2)
+  assert_string(msg3)
+  assert(string.find(msg1, msg, nil, true), "`" .. msg .. "` not found in `" .. msg1 .. "`")
+  assert(string.find(msg2, msg, nil, true), "`" .. msg .. "` not found in `" .. msg2 .. "`")
+  assert(string.find(msg3, msg, nil, true), "`" .. msg .. "` not found in `" .. msg3 .. "`")
 end
 
 function test_error()
@@ -213,26 +212,35 @@ function test_interface()
   assert_function(zmq.error)
   assert_function(zmq.strerror)
   assert_function(zmq.context)
-  assert_function(zmq.poller)
+  -- assert_function(zmq.poller)
   assert_function(zmq.init)
   assert_function(zmq.init_ctx)
+  assert_function(zmq.init_socket)
   assert_function(zmq.msg_init)
   assert_function(zmq.msg_init_size)
   assert_function(zmq.msg_init_data)
-  assert_function(zmq.msg_init_data_multi)
-  assert_function(zmq.msg_init_data_array)
+  -- assert_function(zmq.msg_init_data_multi)
+  -- assert_function(zmq.msg_init_data_array)
   if zmq.proxy then assert_function(zmq.proxy) end
 end
 
+function test_version()
+  local version = assert_table(zmq.version())
+  local major,minor,patch = assert_number(zmq.version(true))
+  assert_equal(major, version[1])
+  assert_equal(minor, version[2])
+  assert_equal(patch, version[3])
 end
 
-local _ENV = TEST_CASE'ctx/skt interface' if true then
+end
+
+local _ENV = TEST_CASE'ctx/skt interface'    if true then
 
 local ctx, skt
 
 function setup()
-  ctx = assert_userdata(zmq.context())
-  skt = assert_userdata(ctx:socket(zmq.SUB))
+  ctx = assert(is_zcontext(zmq.context()))
+  skt = assert(is_zsocket(ctx:socket(zmq.SUB)))
   ctx:autoclose(skt)
 end
 
@@ -254,9 +262,14 @@ function test_context()
   assert_function(ctx.autoclose)
   assert_function(ctx.destroy)
   assert_function(ctx.term)
+  if ctx.shutdown then
+    assert_function(ctx.shutdown)
+    assert_function(ctx.shutdowned)
+  end
 end
 
 function test_socket()
+  assert_function(skt.context)
   assert_function(skt.bind)
   assert_function(skt.unbind)
   assert_function(skt.connect)
@@ -274,6 +287,7 @@ function test_socket()
   assert_function(skt.on_close)
   assert_function(skt.close)
   assert_function(skt.closed)
+  assert_function(skt.lightuserdata)
 
   assert_function(skt.getopt_int)
   assert_function(skt.getopt_i64)
@@ -340,11 +354,11 @@ function test_socket()
   assert_function(skt.last_endpoint           )
   assert_function(skt.get_last_endpoint       )
 
-  assert_function(skt.fail_unroutable         )
-  assert_function(skt.set_fail_unroutable     )
+  -- assert_function(skt.fail_unroutable         )
+  -- assert_function(skt.set_fail_unroutable     )
 
-  assert_function(skt.router_behavior         )
-  assert_function(skt.set_router_behavior     )
+  -- assert_function(skt.router_behavior         )
+  -- assert_function(skt.set_router_behavior     )
 
   assert_function(skt.router_mandatory        )
   assert_function(skt.set_router_mandatory    )
@@ -389,16 +403,38 @@ function test_socket_options()
   assert_true(skt:set_unsubscribe("sub 3"))
 end
 
+function test_socket_options_ctor()
+  assert_true(skt:close())
+  skt = assert(is_zsocket(ctx:socket(zmq.SUB,{
+    subscribe = { "sub 1", "sub 2", "sub 3" };
+    linger    = 123;
+  })))
+  ctx:autoclose(skt)
+  assert_true(skt:set_unsubscribe{"sub 1", "sub 2"})
+  assert_equal(123, skt:get_linger())
+end
+
+function test_socket_options2_ctor()
+  assert_true(skt:close())
+  skt = assert(is_zsocket(ctx:socket{zmq.SUB,
+    subscribe = { "sub 1", "sub 2", "sub 3" };
+    linger    = 123;
+  }))
+  ctx:autoclose(skt)
+  assert_true(skt:set_unsubscribe{"sub 1", "sub 2"})
+  assert_equal(123, skt:get_linger())
+end
+
 function test_context_options()
   assert_true(ctx:set_io_threads(2))
   assert_equal(2, ctx:get_io_threads())
   assert_true(ctx:set_max_sockets(252))
   assert_equal(252, ctx:get_max_sockets())
 
-  local ptr = assert_userdata(ctx:lightuserdata())
-  local ctx2 = assert_userdata(zmq.init_ctx(ptr))
+  local ptr = assert(is_zcontext_ud(ctx:lightuserdata()))
+  local ctx2 = assert(is_zcontext(zmq.init_ctx(ptr)))
   assert_not_equal(ctx, ctx2)
-  assert_not_equal(ptr, ctx2:lightuserdata())
+  -- assert_not_equal(ptr, ctx2:lightuserdata())
   assert_equal(ctx:get_io_threads(),  ctx2:get_io_threads() )
   assert_equal(ctx:get_max_sockets(), ctx2:get_max_sockets())
 
@@ -414,9 +450,86 @@ function test_context_options()
   assert_true(ctx:closed())
 end
 
+function test_context_options_on_ctor()
+  assert_true(ctx:destroy())
+  ctx = assert(is_zcontext(zmq.context{
+    io_threads  = 2;
+    max_sockets =252;
+  }))
+  assert_equal(2, ctx:get_io_threads())
+  assert_equal(252, ctx:get_max_sockets())
 end
 
-local _ENV = TEST_CASE'socket autoclose'  if true then
+function test_context_options_fail_on_ctor()
+  assert_true(ctx:destroy())
+  local ctx, err = zmq.context{
+    max_sockets = -1;
+  }
+  assert_nil(ctx, err)
+end
+
+function test_socket_context()
+  assert_equal(ctx, skt:context())
+end
+
+end
+
+local _ENV = TEST_CASE'context'              if true then
+
+local ctx, skt
+
+function setup() end
+
+function teardown()
+  if skt then skt:close()   end
+  if ctx then ctx:destroy() end
+end
+
+function test_context_shutdown()
+  ctx = assert(is_zcontext(zmq.context()))
+  if not ctx.shutdown then
+    return skip("shutdown support since ZMQ 4.0.0")
+  end
+
+  local ptr  = assert(is_zcontext_ud(ctx:lightuserdata()))
+  local ctx2 = assert(is_zcontext(zmq.init_ctx(ptr)))
+
+  -- to prevent autoclose socket
+  skt = assert(is_zsocket(ctx2:socket(zmq.SUB)))
+  skt:set_rcvtimeo(1)
+
+  local ok, err = skt:recv()
+  assert(not ok, 'EAGAIN expected got: ' .. tostring(ok))
+  assert(error_is(err, zmq.errors.EAGAIN))
+  assert_false(ctx:shutdowned())
+  assert_true(ctx:shutdown())
+  assert_true(ctx:shutdowned())
+  assert_false(ctx:closed())
+  assert_error(function() ctx:socket() end)
+  assert_error(function() ctx:shutdown() end)
+  assert_false(skt:closed())
+  local ok, err = skt:recv()
+  assert(not ok, 'ETERM expected got: ' .. tostring(ok))
+  assert(error_is(err, zmq.errors.ETERM))
+  assert_true(skt:close())
+  assert_true(ctx:destroy())
+end
+
+function test_context_shutdown_autoclose()
+  ctx = assert(is_zcontext(zmq.context()))
+  if not ctx.shutdown then
+    return skip("shutdown support since ZMQ 4.0.0")
+  end
+
+  skt = assert(is_zsocket(ctx:socket(zmq.SUB)))
+  ctx:autoclose(skt)
+  assert_true(ctx:shutdown())
+  assert_true(skt:closed())
+end
+
+end
+
+local _ENV = TEST_CASE'socket autoclose'     if true then
 
 local ctx, skt
 
@@ -428,17 +541,17 @@ function teardown()
 end
 
 function test_socket_autoclose()
-  ctx = assert_userdata(zmq.context())
-  skt = assert_userdata(ctx:socket(zmq.SUB))
-  assert_equal(socket_count(ctx, 1))
+  ctx = assert(is_zcontext(zmq.context()))
+  skt = assert(is_zsocket(ctx:socket(zmq.SUB)))
   ctx:autoclose(skt)
+  assert_equal(socket_count(ctx, 1))
   assert_true(ctx:destroy())
   assert_true(skt:closed())
 
-  ctx = assert_userdata(zmq.context())
+  ctx = assert(is_zcontext(zmq.context()))
   local ptr
   do 
-    local skt = ctx:socket(zmq.SUB)
+    local skt = assert(is_zsocket(ctx:socket(zmq.SUB)))
     assert_equal(socket_count(ctx, 1))
     ptr = weak_ptr(skt)
   end
@@ -447,7 +560,7 @@ function test_socket_autoclose()
   assert_equal(socket_count(ctx, 0))
   assert_true(ctx:destroy())
 
-  ctx = assert_userdata(zmq.context())
+  ctx = assert(is_zcontext(zmq.context()))
   local ptr
   do
     local skt = ctx:socket(zmq.SUB)
@@ -460,9 +573,28 @@ function test_socket_autoclose()
   assert_true(ctx:destroy())
 end
 
+function test_socket_autoclose_poller()
+  ctx = assert(is_zcontext(zmq.context()))
+
+  local poller = zpoller.new(1)
+  local ptr
+  do 
+    local skt = assert(is_zsocket(ctx:socket(zmq.SUB)))
+    assert_equal(socket_count(ctx, 1))
+
+    poller:add(skt, zmq.POLLIN, function() end)
+    poller:remove(skt)
+    ptr = weak_ptr(skt)
+  end
+  gc_collect()
+  assert_nil(ptr.value)
+  assert_equal(socket_count(ctx, 0))
+  assert_true(ctx:destroy())
 end
 
-local _ENV = TEST_CASE'message interface' if true then
+end
+
+local _ENV = TEST_CASE'message'              if true then
 
 local msg
 
@@ -484,7 +616,6 @@ function test_interface()
   assert_function(msg.pointer)
   assert_function(msg.data)
   assert_function(msg.set_data)
-  assert_function(msg.more)
   assert_function(msg.get)
   assert_function(msg.set)
   assert_function(msg.send)
@@ -511,11 +642,11 @@ function test_access_after_close()
 end
 
 function test_create()
-  msg = assert_userdata(zmq.msg_init())
+  msg = assert(is_zmessage(zmq.msg_init()))
   assert_true(msg:close())
-  msg = assert_userdata(zmq.msg_init_size(255))
+  msg = assert(is_zmessage(zmq.msg_init_size(255)))
   assert_true(msg:close())
-  msg = assert_userdata(zmq.msg_init_data("Hello world!"))
+  msg = assert(is_zmessage(zmq.msg_init_data("Hello world!")))
   assert_true(msg:close())
 end
 
@@ -524,7 +655,7 @@ function test_operations()
   local msg2
   local msg3
 
-  msg1 = assert_userdata(zmq.msg_init_size(10))
+  msg1 = assert(is_zmessage(zmq.msg_init_size(10)))
   assert_equal(10, msg1:size())
   assert_true(msg1:set_data("Hello"))
   assert_equal(10, msg1:size())
@@ -538,7 +669,7 @@ function test_operations()
   assert_equal(13, #data)
   assert_equal('Hello, world!', data)
   
-  msg2 = assert_userdata(zmq.msg_init())
+  msg2 = assert(is_zmessage(zmq.msg_init()))
   assert_equal(msg2, msg2:move(msg1))
 
   assert_equal(0, msg1:size())
@@ -551,7 +682,7 @@ function test_operations()
   assert_equal(#data, msg2:size())
   assert_equal(data,  msg2:data())
 
-  msg3 = assert_userdata(zmq.msg_init())
+  msg3 = assert(is_zmessage(zmq.msg_init()))
   assert_equal(msg3, msg3:copy(msg2)) -- copy to exists object
 
   assert_equal(#data, msg2:size())
@@ -565,8 +696,8 @@ function test_operations()
   assert_true(msg2:close())
   assert_true(msg3:close())
   
-  msg1 = assert_userdata(zmq.msg_init_data("hello world"))
-  msg2 = assert_userdata(msg1:copy()) -- copy to new object
+  msg1 = assert(is_zmessage(zmq.msg_init_data("hello world")))
+  msg2 = assert(is_zmessage(msg1:copy())) -- copy to new object
   assert_not_equal(msg1, msg2)
   assert_equal(msg1:data(), msg2:data())
 
@@ -584,12 +715,12 @@ function test_operations()
 end
 
 function test_tostring()
-  local msg = assert_userdata(zmq.msg_init_data("Hello world!"))
+  local msg = assert(is_zmessage(zmq.msg_init_data("Hello world!")))
   assert_equal("Hello world!", tostring(msg))
 end
 
 function test_pointer()
-  local msg = assert_userdata(zmq.msg_init_data("Hello world!"))
+  local msg = assert(is_zmessage(zmq.msg_init_data("Hello world!")))
   local ptr = msg:pointer()
   assert_true(msg:set_data("Privet"))
   assert_equal("Privetworld!", msg:data())
@@ -602,7 +733,7 @@ function test_pointer()
 end
 
 function test_resize()
-  local msg = assert_userdata(zmq.msg_init_data("Hello world!"))
+  local msg = assert(is_zmessage(zmq.msg_init_data("Hello world!")))
   assert_true(msg:set_size(5)) -- shrink
   assert_equal(5, msg:size())
   assert_equal("Hello", msg:data())
@@ -613,7 +744,7 @@ function test_resize()
 end
 
 function test_setdata()
-  local msg = assert_userdata(zmq.msg_init_data("Hello world!"))
+  local msg = assert(is_zmessage(zmq.msg_init_data("Hello world!")))
   assert_true(msg:set_data("Privet")) -- this is do not shrink message
   assert_equal(12, msg:size())
   assert_equal("Privetworld!", msg:data())
@@ -624,20 +755,24 @@ end
 
 end
 
-local _ENV = TEST_CASE'bind/connect'      if true then
+local _ENV = TEST_CASE'bind/connect'         if true then
 
 local ctx, pub, sub1, sub2, sub3, msg
 
 function setup()
-  ctx = assert_userdata(zmq.context())
-  pub = assert_userdata(ctx:socket(zmq.PUB))
+  ctx = assert(is_zcontext(zmq.context()))
+  pub = assert(is_zsocket(ctx:socket(zmq.PUB)))
   ctx:autoclose(pub)
-  sub1 = assert_userdata(ctx:socket(zmq.SUB))
-  sub2 = assert_userdata(ctx:socket(zmq.SUB))
-  sub3 = assert_userdata(ctx:socket(zmq.SUB))
+  sub1 = assert(is_zsocket(ctx:socket(zmq.SUB)))
   ctx:autoclose(sub1)
+  sub2 = assert(is_zsocket(ctx:socket(zmq.SUB)))
   ctx:autoclose(sub2)
+  sub3 = assert(is_zsocket(ctx:socket(zmq.SUB)))
   ctx:autoclose(sub3)
+  
+  sub1:set_rcvtimeo(1000)
+  sub2:set_rcvtimeo(1000)
+  sub3:set_rcvtimeo(1000)
 end
 
 function teardown()
@@ -658,6 +793,8 @@ function test_connect()
     "inproc://pub.test.3";
   }
 
+  -- do return end
+
   assert_nil(ok)
   assert_equal("error address", str)
   assert_true(pub:bind("inproc://pub.test.3"))
@@ -669,6 +806,7 @@ function test_connect()
   assert_true(sub1:set_rcvtimeo(100))
   assert_true(sub2:set_rcvtimeo(100))
   assert_true(sub3:set_rcvtimeo(100))
+  
 
   wait()
 
@@ -708,17 +846,97 @@ function test_connect()
   end
 end
 
+function test_bind_random_port()
+  local port1 = assert_number(pub:bind_to_random_port("tcp://127.0.0.1"))
+  local port2 = assert_number(pub:bind_to_random_port("tcp://127.0.0.1"))
+  assert_not_equal(port1, port2)
+  wait()
+  sub1:subscribe("")
+  sub2:subscribe("")
+  assert(sub1:connect("tcp://127.0.0.1:" .. port1))
+  assert(sub2:connect("tcp://127.0.0.1:" .. port2))
+  wait()
+  
+  assert(pub:send("HELLO"))
+  assert_equal("HELLO", sub1:recv())
+  assert_equal("HELLO", sub2:recv())
 end
 
-local _ENV = TEST_CASE'Send Recv'         if true then
+function test_bind_random_port_fail()
+  assert_nil(pub:bind_to_random_port("tcp//127.0.0.1"))
+  local port1 = assert_number(pub:bind_to_random_port("tcp://127.0.0.1"))
+  assert_nil(pub:bind_to_random_port("tcp://127.0.0.1", port1, 1))
+end
+
+function test_bind_random_port_error()
+  assert_error(function() pub:bind_to_random_port("tcp://127.0.0.1", 0) end)
+  assert_error(function() pub:bind_to_random_port("tcp://127.0.0.1", 1, 0) end)
+end
+
+end
+
+local _ENV = TEST_CASE'bind/connect on ctor' if true then
 
 local ctx, pub, sub, msg
 
 function setup()
-  ctx = assert_userdata(zmq.context())
-  pub = assert_userdata(ctx:socket(zmq.PUB))
+  ctx = assert(is_zcontext(zmq.context()))
+end
+
+function teardown()
+  if pub then pub:close()   end
+  if sub then sub:close()   end
+  if ctx then ctx:destroy() end
+end
+
+function test_connect()
+  pub = assert(is_zsocket(ctx:socket(zmq.PUB,{
+    bind = {
+      "inproc://pub.test.1";
+      "inproc://pub.test.2";
+      "inproc://pub.test.3";
+    };
+  })))
   ctx:autoclose(pub)
-  sub = assert_userdata(ctx:socket(zmq.SUB))
+
+  sub = assert(is_zsocket(ctx:socket(zmq.SUB,{
+    subscribe = "", rcvtimeo = 100;
+    connect = "inproc://pub.test.1";
+  })))
+  ctx:autoclose(sub)
+
+  wait()
+
+  assert_true(pub:send("hello"))
+  assert_equal( "hello", assert_string(sub:recv()))
+end
+
+function test_fail_bind()
+  local err, str
+  pub, err, str = ctx:socket(zmq.PUB,{
+    bind = {
+      "inproc://pub.test.1";
+      "inproc://pub.test.2";
+      "inproc://pub.test.3";
+      "error address"
+    };
+  })
+  assert_nil(pub)
+  assert_equal("error address", str)
+  assert_equal(socket_count(ctx, 0))
+end
+
+end
+
+local _ENV = TEST_CASE'Send Recv'            if true then
+
+local ctx, pub, sub, msg
+
+function setup()
+  ctx = assert(is_zcontext(zmq.context()))
+  pub = assert(is_zsocket(ctx:socket(zmq.PUB)))
+  ctx:autoclose(pub)
+  sub = assert(is_zsocket(ctx:socket(zmq.SUB)))
   ctx:autoclose(sub)
   assert_true(pub:bind("inproc://test"))
   wait()
@@ -757,6 +975,14 @@ function test_recv_len()
   assert_equal(8, len)
 end
 
+function test_recv_len_0()
+  assert_true(pub:send(("0"):rep(32)))
+
+  local str, more, len = assert_equal("", sub:recv_len(0))
+  assert_false(more)
+  assert_equal(32, len)
+end
+
 function test_recv_msg()
   do -- send
     msg = assert(zmq.msg_init_data('hello'))
@@ -770,7 +996,7 @@ function test_recv_msg()
   end
 
   do -- recv
-    msg = assert_userdata(zmq.msg_init())
+    msg = assert(is_zmessage(zmq.msg_init()))
     local msg2, more = sub:recv_msg(msg)
     assert_equal(msg, msg2, more)
     assert_false(more)
@@ -784,13 +1010,13 @@ end
 
 function test_recv_msg_more()
   do -- send
-    msg = assert_userdata(zmq.msg_init_data('hello'))
+    msg = assert(is_zmessage(zmq.msg_init_data('hello')))
     assert_true(msg:send_more(pub))
     assert_equal(0, msg:size())
     assert_false(msg:closed())
     assert_true(msg:close())
     assert_true(pub:send_more(", "))
-    msg = assert_userdata(zmq.msg_init_data('world'))
+    msg = assert(is_zmessage(zmq.msg_init_data('world')))
     assert_true(msg:send(pub, zmq.SNDMORE))
     assert_true(pub:send("!!!", zmq.SNDMORE))
     assert_true(pub:send(""))
@@ -804,14 +1030,14 @@ function test_recv_msg_more()
     assert_equal(1, sub:rcvmore())
 
     local msg2, more = sub:recv_new_msg()
-    assert_userdata(msg2)
+    assert(is_zmessage(msg2))
     assert_equal(', ', msg2:data())
     assert_true(more)
     assert_equal(more, sub:more())
     assert_equal(more, msg2:more())
     assert_equal(1, sub:rcvmore())
 
-    local msg3 = assert_userdata(zmq.msg_init())
+    local msg3 = assert(is_zmessage(zmq.msg_init()))
     local msg3_, more = msg3:recv(sub)
     assert_equal(msg3, msg3_, more)
     assert_equal('world', msg3:data())
@@ -839,9 +1065,95 @@ function test_recv_all()
   assert_equal('hello, world', table.concat(t))
 end
 
+function test_sendx()
+  assert_true(pub:sendx('hello', ', ', 'world'))
+  local a,b,c = assert_string(sub:recvx())
+  assert_string(b)
+  assert_string(c)
+  assert_equal('hello, world', a .. b .. c)
 end
 
-local _ENV = TEST_CASE'loop'              if true then
+function test_sendx_more()
+  assert_true(pub:sendx_more('hello', ', '))
+  assert_true(pub:send('world'))
+  local a,b,c = assert_string(sub:recvx())
+  assert_string(b)
+  assert_string(c)
+  assert_equal('hello, world', a .. b .. c)
+end
+
+function test_send_all_wrong_flag()
+  local ok, err = pub:send_all({'hello', ', ', 'world'}, zmq.DONTWAIT)
+  assert_nil(ok)
+  assert(error_is(err, zmq.errors.ENOTSUP))
+end
+
+function test_send_all_more()
+  assert_true(pub:send_all({'hello', ', '},zmq.SNDMORE))
+  assert_true(pub:send('world'))
+  local t = assert_table(sub:recv_all())
+  assert_equal(3, #t)
+  assert_equal('hello, world', table.concat(t))
+end
+
+function test_send_all_position()
+  local msg = {
+    [-1] = 'hello';
+    [ 0] = ', ';
+    [ 1] = 'world';
+  }
+  
+  local ok, err = pub:send_all(msg, 0, -1, 1)
+  local t = assert_table(sub:recv_all())
+  assert_equal(3, #t)
+  assert_equal('hello, world', table.concat(t))
+end
+
+function test_send_all_hole()
+  assert_error(function()
+    pub:send_all({"1", nil, "2"}, 0, 1, 3)
+  end)
+end
+
+function test_sendx_hole()
+  assert_error(function()
+    pub:sendx("1", nil, "2")
+  end)
+end
+
+end
+
+local _ENV = TEST_CASE'socket poll'          if true then
+
+local ctx, req, rep, timer
+
+function setup()
+  ctx   = assert(zmq.context())
+  rep   = assert(ctx:socket{zmq.REP, bind = ECHO_ADDR, rcvtimeo = 100})
+  req   = assert(ctx:socket{zmq.REQ, connect = ECHO_ADDR})
+  timer = ztimer.monotonic()
+end
+
+function teardown()
+  if ctx then ctx:destroy() end
+  timer:close()
+end
+
+function test_timeout()
+  timer:start()
+  assert_false(rep:poll(2000))
+  assert_true(ge(1900, timer:stop()))
+end
+
+function test_recv()
+  req:send("HELLO")
+  assert_true(rep:poll(2000))
+  assert_equal("HELLO", rep:recv())
+end
+
+end
+
+local _ENV = TEST_CASE'loop'                 if true then
 
 local loop, timer
 
@@ -852,6 +1164,7 @@ end
 
 function teardown()
   loop:destroy()
+  timer:close()
   wait(500) -- for TCP time to release IP address
 end
 
@@ -863,14 +1176,14 @@ function test_sleep()
 
   timer:start()
   assert_equal(1, loop:sleep_ex(100)) -- run event
-  assert_true(timer:stop() >= 100)    -- wait full interval
+  assert_true(ge(100, timer:stop()))  -- wait full interval
   assert_true(flag1)                  -- ensure event was emit
 
   flag1 = false
   loop:add_once(10, function() assert_false(flag1) flag1 = true end)
   timer:start()
   loop.sleep(100)                     -- do not run event
-  assert_true(timer:stop() >= 100)    -- wait full interval
+  assert_true(ge(100, timer:stop()))  -- wait full interval
   assert_false(flag1)
 
   assert_equal(0, loop:flush(100))    -- only flush io events and no wait
@@ -971,7 +1284,7 @@ function test_echo()
 
   timer:start()
   loop:start()
-  assert_true(timer:stop() >= 2000)
+  assert_true(ge(2000, timer:stop()))
   assert_true(counter > 3)
 
   loop:destroy()
@@ -981,7 +1294,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'timer'             if true then
+local _ENV = TEST_CASE'timer'                if true then
 
 local timer
 
@@ -1090,6 +1403,446 @@ end
 function test_absolute()
   timer = ztimer.absolute()
   test_timer(timer)
+end
+
+end
+
+local _ENV = TEST_CASE'poller'               if true then
+local ctx, pub, sub1, sub2, sub3, msg
+local poller
+local names
+
+function setup()
+  ctx = assert(is_zcontext(zmq.context()))
+  pub = assert(is_zsocket(ctx:socket(zmq.PUB)))
+  ctx:autoclose(pub)
+  sub1 = assert(is_zsocket(ctx:socket(zmq.SUB)))
+  ctx:autoclose(sub1)
+  sub2 = assert(is_zsocket(ctx:socket(zmq.SUB)))
+  ctx:autoclose(sub2)
+  sub3 = assert(is_zsocket(ctx:socket(zmq.SUB)))
+  ctx:autoclose(sub3)
+  poller = zpoller.new()
+
+  names = {}
+  names[sub1] = "sub1"
+  names[sub2] = "sub2"
+  names[sub3] = "sub3"
+
+  assert_true(pub:bind("inproc://pub.test.1"))
+
+  assert_true(sub1:subscribe(""))
+  assert_true(sub2:subscribe(""))
+  assert_true(sub3:subscribe(""))
+
+  wait()
+
+  assert_true(sub1:connect("inproc://pub.test.1"))
+  assert_true(sub2:connect("inproc://pub.test.1"))
+  assert_true(sub3:connect("inproc://pub.test.1"))
+
+  wait()
+end
+
+function teardown()
+  if msg then msg:close()               end
+  if ctx then ctx:destroy()             end
+  if pub then assert_true(pub:closed()) end
+  if sub1 then assert_true(sub1:closed()) end
+  if sub2 then assert_true(sub2:closed()) end
+  if sub3 then assert_true(sub3:closed()) end
+end
+
+function test_poll_withot_timeout()
+  poller:add(sub1, zmq.POLLIN, function() end)
+  assert_error(function() poller:poll() end)
+end
+
+function test_add_error()
+  assert_error(function() poller:add(sub1, zmq.POLLIN) end)
+  assert_error(function() poller:add(sub1) end)
+  assert_error(function() poller:add() end)
+end
+
+function test_create()
+  local t = {}
+  poller:add(sub1, zmq.POLLIN, function(skt) assert_equal(sub1, skt, " expect socket `sub1` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+  poller:add(sub2, zmq.POLLIN, function(skt) assert_equal(sub2, skt, " expect socket `sub2` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+  poller:add(sub3, zmq.POLLIN, function(skt) assert_equal(sub3, skt, " expect socket `sub3` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+
+  assert_true(pub:send("hello"))
+
+  assert_equal(3, poller:poll(100))
+  local ret
+  ret = t[sub1] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub2] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub3] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+end
+
+function test_remove()
+  local t  = {}
+
+  poller:add(sub1, zmq.POLLIN, function(skt) assert_equal(sub1, skt, " expect socket `sub1` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+  poller:add(sub2, zmq.POLLIN, function(skt) fail("poller remove fail") end)
+  poller:add(sub3, zmq.POLLIN, function(skt) fail("poller modify fail") end)
+
+  poller:remove(sub2)
+  poller:modify(sub3, zmq.POLLIN, function(skt) assert_equal(sub3, skt, " expect socket `sub3` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+
+  assert_true(pub:send("hello"))
+
+  assert_equal(2, poller:poll(100))
+  local ret
+  ret = t[sub1] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub3] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+end
+
+function test_remove_on_poll()
+  local t  = {}
+
+  poller:add(sub1, zmq.POLLIN, function(skt) assert_equal(sub1, skt, " expect socket `sub1` got `" .. (names[skt] or tostring(skt)) .. "`") t[skt] = {skt:recv()} end)
+  poller:add(sub2, zmq.POLLIN, function(skt) assert_equal(sub2, skt, " expect socket `sub2` got `" .. (names[skt] or tostring(skt)) .. "`") t[skt] = {skt:recv()} poller:remove(skt) end)
+  poller:add(sub3, zmq.POLLIN, function(skt) assert_equal(sub3, skt, " expect socket `sub3` got `" .. (names[skt] or tostring(skt)) .. "`") t[skt] = {skt:recv()} end)
+
+  assert_true(pub:send("hello"))
+
+  assert_equal(3, poller:poll(100))
+  local ret
+  ret = t[sub1] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub2] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub3] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+end
+
+end
+
+local _ENV = TEST_CASE'z85 encode'           if true then
+if not zmq.z85_encode then test = SKIP"zmq_z85_encode does not support" else
+
+local key_bin = "\084\252\186\036\233\050\073\150\147\022\251\097\124\135\043\176" ..
+                "\193\209\255\020\128\004\039\197\148\203\250\207\027\194\214\082"
+
+local key_txt = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7";
+
+local function dump(str)
+  return (string.gsub(str,".", function(ch)
+    return (string.format("\\%.3d", string.byte(ch)))
+  end))
+end
+
+function test_encode()
+  local encoded = assert_string(zmq.z85_encode(key_bin))
+  assert_equal(key_txt, encoded)
+end
+
+local function encoden(str, n) return zmq.z85_encode(str:rep(n)) end
+
+local function decoden(str, n) return zmq.z85_decode(str:rep(n)) end
+
+function test_encodeN()
+  local encoded = assert_string(encoden(key_bin, 100))
+  assert_equal(key_txt:rep(100), encoded)
+
+  local encoded = assert_string(encoden(key_bin, 1000))
+  assert_equal(key_txt:rep(1000), encoded)
+end
+
+function test_decode()
+  local decoded = assert_string(zmq.z85_decode(key_txt))
+  assert_equal(dump(key_bin), dump(decoded))
+end
+
+function test_decodeN()
+  local decoded = assert_string(decoden(key_txt, 100))
+  assert_equal(dump(key_bin:rep(100)), dump(decoded))
+
+  local decoded = assert_string(decoden(key_txt, 1000))
+  assert_equal(dump(key_bin:rep(1000)), dump(decoded))
+end
+
+function test_encode_wrong_size()
+  assert_error(function() zmq.z85_encode(key_bin .. "1") end)
+end
+
+function test_decode_wrong_size()
+  assert_error(function() zmq.z85_decode(key_txt .. "2") end)
+end
+
+end
+end
+
+local _ENV = TEST_CASE'curve keypair'        if true then
+if not zmq.curve_keypair then test = SKIP"zmq_curve_keypair does not support" else
+
+function test_generate_z85()
+  local pub, sec = zmq.curve_keypair()
+  if not pub then
+    assert(error_is(sec, zmq.errors.ENOTSUP))
+    return skip("you need build libzmq with libsodium")
+  end
+  assert_string(pub)
+  assert_string(sec)
+  assert_equal(40, #pub)
+  assert_equal(40, #sec)
+end
+
+function test_generate_bin()
+  local pub, sec = zmq.curve_keypair(true)
+  if not pub then
+    assert(error_is(sec, zmq.errors.ENOTSUP))
+    return skip("you need build libzmq with libsodium")
+  end
+  assert_string(pub)
+  assert_string(sec)
+  assert_equal(32, #pub)
+  assert_equal(32, #sec)
+end
+
+end
+end
+
+local _ENV = TEST_CASE'monitor'              if true then
+
+local loop, timer
+
+function setup()
+  loop  = assert(zloop.new())
+  timer = ztimer.monotonic()
+end
+
+function teardown()
+  loop:destroy()
+  wait(500) -- for TCP time to release IP address
+end
+
+function test_monitor()
+  local counter = 0
+  local monitor_called = false
+  local address = "<NOT ACCEPTED>"
+
+  local function echo(skt)
+    local msg = assert_table(skt:recv_all())
+    assert_true(skt:send_all(msg))
+    counter = counter + 1
+  end
+
+  local srv = assert(is_zsocket(loop:create_socket(zmq.REP, {
+    linger = 0, sndtimeo = 100, rcvtimeo = 100;
+    bind = {
+      "inproc://test.zmq";
+      "tcp://*:9000";
+    }
+  })))
+  loop:add_socket(srv, echo)
+
+  if not srv.monitor then
+    return skip("this version of LZMQ does not support socket monitor")
+  end
+
+  if not srv.recv_event then
+    return skip("this version of LZMQ does not support receive event")
+  end
+
+  local monitor_endpoint = assert_string(srv:monitor())
+
+  assert(is_zsocket(loop:add_new_connect(zmq.PAIR, monitor_endpoint, function(sok)
+    monitor_called = true
+    local event, data, addr = sok:recv_event()
+    assert_number(event, data)
+    assert_number(data)
+    if addr then assert_string(addr) end
+
+    if event == zmq.EVENT_ACCEPTED then
+      address = addr
+    end
+  end)))
+
+  wait()
+
+  local cli = assert(is_zsocket(loop:create_socket(zmq.REQ, {
+    linger = 0, sndtimeo = 100, rcvtimeo = 100;
+    connect = "tcp://127.0.0.1:9000";
+  })))
+  loop:add_socket(cli, echo)
+
+  -- run ball
+  loop:add_once(10, function() cli:send_all{'hello', 'world'} end)
+
+  -- time to play
+  loop:add_once(500, function() loop:interrupt() end)
+
+  loop:start()
+
+  loop:destroy()
+
+  assert_true(monitor_called)
+  assert_string(address)
+  assert_match("^tcp://%d+%.%d+%.%d+%.%d+:%d+$", address)
+end
+
+function test_monitor_with_addr()
+  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  if not srv.monitor then
+    return skip("this version of LZMQ does not support socket monitor")
+  end
+
+  local addr = "inproc://lzmq.monitor.test"
+  assert_equal(addr, srv:monitor(addr))
+end
+
+function test_monitor_with_wrong_addr()
+  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  if not srv.monitor then
+    return skip("this version of LZMQ does not support socket monitor")
+  end
+
+  local addr = "lzmq.monitor.test"
+  local ok, err = srv:monitor(addr)
+  assert_nil(ok)
+  assert(error_is(err, zmq.errors.EINVAL))
+end
+
+function test_monitor_without_addr()
+  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  if not srv.monitor then
+    return skip("this version of LZMQ does not support socket monitor")
+  end
+
+  assert_match("^inproc://lzmq%.monitor%.[0-9a-fA-FxX]+$", srv:monitor())
+end
+
+function test_monitor_without_addr_with_event()
+  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  if not srv.monitor then
+    return skip("this version of LZMQ does not support socket monitor")
+  end
+
+  assert_match("^inproc://lzmq%.monitor%.[0-9a-fA-FxX]+$", srv:monitor(1))
+end
+
+
+end
+
+local _ENV = TEST_CASE'Clone socket'         if true then
+
+local ctx, rep, s1, s2
+
+function setup()
+  ctx = assert(is_zcontext(zmq.context()))
+  rep = assert(is_zsocket(ctx:socket{zmq.REP, bind    = ECHO_ADDR}))
+  s1  = assert(is_zsocket(ctx:socket{zmq.REQ, connect = ECHO_ADDR}))
+  wait()
+end
+
+function teardown()
+  if rep then rep:close() end
+  if ctx then ctx:destroy() end
+end
+
+function test_lightuserdata()
+  local h = assert(s1:lightuserdata())
+end
+
+function test_wrap_socket()
+  local h = assert(s1:lightuserdata())
+  s2 =  assert(is_zsocket(zmq.init_socket(h)))
+  assert_nil(s2:context())
+  assert_equal(socket_count(ctx, 2))
+end
+
+function test_send_recv()
+  local h = assert(s1:lightuserdata())
+  s2 =  assert(is_zsocket(zmq.init_socket(h)))
+  assert_true(s1:send("hello"))
+  assert_equal("hello", rep:recv())
+  assert_true(rep:send("world"))
+  assert_equal("world", s2:recv())
+end
+
+function test_swap()
+  local h1 = assert(s1:lightuserdata())
+  local h2 = assert(rep:reset_handle(h1))
+  assert_equal(h1, s1:reset_handle(h2))
+
+  assert_true(rep:send("hello"))
+  assert_equal("hello", s1:recv())
+  assert_true(s1:send("world"))
+  assert_equal("world", rep:recv())
+end
+
+function test_reset_handle()
+  local h1 = assert(s1:lightuserdata())
+  assert_error(function() rep:reset_handle() end)
+  assert_true(rep:reset_handle(h1, false, true)) -- close handle
+end
+
+function test_reset_handle_own()
+  local h1 = assert(s1:lightuserdata())
+  local h2 = assert(rep:reset_handle(h1, false)) -- do not close h1 after rep:close()
+  assert_true(rep:close())
+
+  -- anchor h2 to socket
+  rep = zmq.init_socket(h2)
+  rep:reset_handle(h2, true)
+
+  assert_true(s1:bind("inproc://test"))
+end
+
+function test_reset_handle_nochange_own()
+  local h1 = assert(s1:lightuserdata())
+  local h2 = assert(rep:reset_handle(h1)) -- by default rep close handle on `close` method
+  assert_true(rep:close())
+
+  assert_nil(s1:bind("inproc://test"))
+
+  -- close h2
+  s1:reset_handle(h2, true)
+end
+
+function test_reset_handle_nochange2_own()
+  local h1 = assert(s1:lightuserdata())
+  local h2 = assert(rep:reset_handle(h1, false)) -- do not close h1 after rep:close()
+  assert(rep:reset_handle(h1))                   -- do not change on_close bihavior
+
+  assert_true(rep:close())
+
+  -- anchor h2 to socket
+  rep = zmq.init_socket(h2)
+  rep:reset_handle(h2, true)
+
+  assert_true(s1:bind("inproc://test"))
+end
+
+end
+
+local _ENV = TEST_CASE'Recv event'           if true then
+
+local ctx, skt, mon
+local timeout, epselon = 1500, 490
+
+function setup()
+  ctx = assert(is_zcontext(zmq.context()))
+  skt = assert(is_zsocket(ctx:socket(zmq.PUB)))
+  local monitor_endpoint = assert_string(skt:monitor())
+  mon = assert(is_zsocket(ctx:socket{zmq.PAIR,
+    rcvtimeo = timeout, connect = monitor_endpoint
+  }))
+end
+
+function teardown()
+  if ctx then ctx:destroy()             end
+end
+
+function test()
+  local timer = ztimer.monotonic():start()
+  assert_nil( mon:recv_event() )
+  local elapsed = timer:stop()
+  assert(elapsed > (timeout-epselon), "Expeted " .. timeout .. "(+/-" .. epselon .. ") got: " .. elapsed)
+  assert(elapsed < (timeout+epselon), "Expeted " .. timeout .. "(+/-" .. epselon .. ") got: " .. elapsed)
+
+  timer:start()
+  assert_nil( mon:recv_event(zmq.DONTWAIT) )
+  elapsed = timer:stop()
+  assert(elapsed < (epselon), "Expeted less then " .. epselon .. " got: " .. elapsed)
 end
 
 end

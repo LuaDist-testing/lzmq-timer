@@ -22,6 +22,8 @@
 #include "poller.h"
 #include <memory.h>
 #include <assert.h>
+#include <memory.h>
+#include <stdlib.h>
 
 #define FREE_ITEM_EVENTS_TAG ((short)0xFFFF)
 
@@ -31,7 +33,7 @@ static int poller_resize_items(ZMQ_Poller *poller, int len) {
 	int old_len = poller->len;
 
 	/* make sure new length is atleast as large as items count. */
-	len = (poller->count <= len) ? len : poller->count;
+	len = (old_len <= len) ? len : old_len;
 
 	/* if the new length is the same as the old length, then don't try to resize. */
 	if(old_len == len) return len;
@@ -92,6 +94,8 @@ int poller_find_fd_item(ZMQ_Poller *poller, socket_t fd) {
 	return -1;
 }
 
+static int poller_compact_items(ZMQ_Poller *poller);
+
 void poller_remove_item(ZMQ_Poller *poller, int idx) {
 	zmq_pollitem_t *items;
 	int free_list;
@@ -117,6 +121,7 @@ void poller_remove_item(ZMQ_Poller *poller, int idx) {
 	items[idx].events = FREE_ITEM_EVENTS_TAG;
 	/* clear old revents. */
 	items[idx].revents = 0;
+	poller_compact_items(poller);
 }
 
 int poller_get_free_item(ZMQ_Poller *poller) {
@@ -209,7 +214,6 @@ int poller_poll(ZMQ_Poller *poller, long timeout) {
 
 int poller_next_revents(ZMQ_Poller *poller, int *revents) {
 	zmq_pollitem_t *items;
-	int count;
 	int idx;
 
 	idx = poller->next;
@@ -218,13 +222,12 @@ int poller_next_revents(ZMQ_Poller *poller, int *revents) {
 		return idx;
 	}
 	items = poller->items;
-	count = poller->count;
 	/* find next item with pending events. */
-	for(;idx < count; ++idx) {
+	for(;idx >=0; --idx) {
 		/* did we find a pending event? */
 		if(items[idx].revents != 0) {
 			*revents = items[idx].revents;
-			poller->next = idx+1;
+			poller->next = idx-1;
 			return idx;
 		}
 	}

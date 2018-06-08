@@ -158,6 +158,14 @@ end
 -- needs --
 -----------------------
 
+lake.define_need('lua53', function()
+  return {
+    incdir = J(ENV.LUA_DIR_5_3, 'include');
+    libdir = J(ENV.LUA_DIR_5_3, 'lib');
+    libs   = {'lua53'};
+  }
+end)
+
 lake.define_need('lua52', function()
   return {
     incdir = J(ENV.LUA_DIR_5_2, 'include');
@@ -178,7 +186,15 @@ lake.define_need('zmq3', function()
   return {
     incdir = J(ENV.ZMQ3_DIR, 'include');
     libdir = J(ENV.ZMQ3_DIR, 'lib');
-    libs   = {'libzmq3'};
+    libs   = {'libzmq'};
+  }
+end)
+
+lake.define_need('zmq4', function()
+  return {
+    incdir = J(ENV.ZMQ4_DIR, 'include');
+    libdir = J(ENV.ZMQ4_DIR, 'lib');
+    libs   = {'libzmq'};
   }
 end)
 
