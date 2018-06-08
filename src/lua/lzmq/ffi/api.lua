@@ -1,3 +1,13 @@
+--
+--  Author: Alexey Melnichuk <mimir@newmail.ru>
+--
+--  Copyright (C) 2013-2014 Alexey Melnichuk <mimir@newmail.ru>
+--
+--  Licensed according to the included 'LICENCE' document
+--
+--  This file is part of lua-lzqm library.
+--
+
 local ffi     = require "ffi"
 local IS_WINDOWS = (ffi.os:lower() == 'windows') or
                    (package.config:sub(1,1) == '\\')
@@ -20,11 +30,6 @@ local function oload(t)
     err = err .. "\n" .. mod
   end
   error(err)
-end
-
-local function IF(cond, true_v, false_v)
-  if cond then return true_v end
-  return false_v
 end
 
 local bit     = orequire("bit32", "bit")
@@ -75,10 +80,37 @@ if IS_WINDOWS and ffi.arch == 'x64' then
 else
   fd_t, afd_t = "int", aint_t
 end
+local fd_size         = ffi.sizeof(fd_t)
 
-ffi.cdef[[
+-- !Note! this allocator could return same buffer more then once.
+-- So you can not use this function to allocate 2 different buffers.
+local function create_tmp_allocator(array_size, array_type)
+  assert(type(array_size) == "number")
+  assert(array_size > 0)
+
+  if type(array_type) == 'string' then
+    array_type = ffi.typeof(array_type)
+  else
+    array_type = array_type or vla_char_t
+  end
+
+  local buffer
+
+  return function(len)
+    if len <= array_size then
+      if not buffer then
+        buffer = ffi.new(array_type, array_size)
+      end
+      return buffer
+    end
+    return ffi.new(array_type, len)
+  end
+end
+
+local header = [[
   void zmq_version (int *major, int *minor, int *patch);
 ]]
+ffi.cdef(header)
 
 local _M = {}
 
@@ -110,16 +142,18 @@ local is_zmq_ge = function (major, minor, patch)
 end
 
 if is_zmq_ge(4, 1, 0) then
-  ffi.cdef[[
-    typedef struct zmq_msg_t {unsigned char _ [40];} zmq_msg_t;
+  header = [[
+    typedef struct zmq_msg_t {unsigned char _ [48];} zmq_msg_t;
   ]]
+  ffi.cdef(header)
 else
-  ffi.cdef[[
+  header = [[
     typedef struct zmq_msg_t {unsigned char _ [32];} zmq_msg_t;
   ]]
+  ffi.cdef(header)
 end
 
-ffi.cdef[[
+header = [[
   int zmq_errno (void);
   const char *zmq_strerror (int errnum);
 
@@ -158,34 +192,50 @@ ffi.cdef[[
   int    zmq_msg_get       (zmq_msg_t *msg, int option);
   int    zmq_msg_set       (zmq_msg_t *msg, int option, int optval);
 ]]
+ffi.cdef(header)
 
-ffi.cdef([[
+if is_zmq_ge(4, 1, 0) then
+  ffi.cdef[[
+    const char *zmq_msg_gets (zmq_msg_t *msg, const char *property);
+  ]]
+end
+
+header = [[
 typedef struct {
   void *socket;
-  ]] .. IF(IS_WINDOWS, "uint32_t", "int") .. [[ fd;
+  ]] .. fd_t .. [[ fd;
   short events;
   short revents;
 } zmq_pollitem_t;
 
 int zmq_poll (zmq_pollitem_t *items, int nitems, long timeout);
-]])
+]]
+ffi.cdef(header)
 
-ffi.cdef[[
+header = [[
+  int zmq_has (const char *capability);
+]]
+ffi.cdef(header)
+
+header = [[
   int zmq_proxy  (void *frontend, void *backend, void *capture);
   int zmq_device (int type, void *frontend, void *backend);
   int zmq_proxy_steerable (void *frontend, void *backend, void *capture, void *control);
 ]]
+ffi.cdef(header)
 
-ffi.cdef[[
+header = [[
   char *zmq_z85_encode (char *dest, const char *data, size_t size);
   char *zmq_z85_decode (char *dest, const char *string);
   int zmq_curve_keypair (char *z85_public_key, char *z85_secret_key);
 ]]
+ffi.cdef(header)
 
-ffi.cdef[[
+header = [[
   void *zmq_stopwatch_start (void);
   unsigned long zmq_stopwatch_stop (void *watch_);
 ]]
+ffi.cdef(header)
 
 local zmq_msg_t       = ffi.typeof("zmq_msg_t")
 local vla_pollitem_t  = ffi.typeof("zmq_pollitem_t[?]")
@@ -235,7 +285,7 @@ local function pget(lib, elem)
   return nil, err
 end
 
--- zmq_errno, zmq_strerror, zmq_poll, zmq_device, zmq_proxy
+-- zmq_errno, zmq_strerror, zmq_poll, zmq_device, zmq_proxy, zmq_has
 do
 
 function _M.zmq_errno()
@@ -263,6 +313,16 @@ if pget(libzmq3, "zmq_proxy_steerable") then
 
 function _M.zmq_proxy_steerable(frontend, backend, capture, control)
   return libzmq3.zmq_proxy_steerable(frontend, backend, capture, control)
+end
+
+end
+
+if pget(libzmq3, "zmq_has") then
+
+function _M.zmq_has(capability)
+  local v = libzmq3.zmq_has(capability)
+  if v == 1 then return true end
+  return false
 end
 
 end
@@ -323,7 +383,7 @@ function _M.zmq_close(skt)
 end
 
 local function gen_setopt_int(t, ct)
-  return function (skt, option, optval) 
+  return function (skt, option, optval)
     local size = ffi.sizeof(t)
     local val  = ffi.new(ct, optval)
     return libzmq3.zmq_setsockopt(skt, option, val, size)
@@ -331,7 +391,7 @@ local function gen_setopt_int(t, ct)
 end
 
 local function gen_getopt_int(t, ct)
-  return function (skt, option) 
+  return function (skt, option)
     local size = ffi.new(asize_t, ffi.sizeof(t))
     local val  = ffi.new(ct, 0)
     if -1 ~= libzmq3.zmq_getsockopt(skt, option, val, size) then
@@ -365,6 +425,22 @@ function _M.zmq_skt_getopt_str(skt, option)
     return ""
   end
   return
+end
+
+function _M.zmq_skt_getopt_identity_fd(skt, option, id)
+  local buffer_len = 255
+  assert(#id <= buffer_len, "identity too big")
+
+  local size   = ffi.new(asize_t, #id)
+  local buffer = ffi.new(vla_char_t, buffer_len)
+  local val    = ffi.new(afd_t, 0)
+
+  ffi.copy(buffer, id)
+
+  if -1 ~= libzmq3.zmq_getsockopt(skt, option, buffer, size) then
+    ffi.copy(val, buffer, fd_size)
+    return val[0]
+  end
 end
 
 function _M.zmq_connect(skt, addr)
@@ -411,7 +487,7 @@ end
 
 -- zmq_msg_init, zmq_msg_init_size, zmq_msg_data, zmq_msg_size, zmq_msg_get, 
 -- zmq_msg_set, zmq_msg_move, zmq_msg_copy, zmq_msg_set_data, zmq_msg_get_data, 
--- zmq_msg_init_string, zmq_msg_recv, zmq_msg_send, zmq_msg_more
+-- zmq_msg_init_string, zmq_msg_recv, zmq_msg_send, zmq_msg_more, zmq_msg_gets
 do -- message
 
 function _M.zmq_msg_init(msg)
@@ -501,23 +577,23 @@ function _M.zmq_msg_set(msg, option, optval)
   return libzmq3.zmq_msg_set(msg, option, optval)
 end
 
+if pget(libzmq3, "zmq_msg_gets") then
+
+function _M.zmq_msg_gets(msg, option)
+  local value = libzmq3.zmq_msg_gets(msg, option)
+  if value == NULL then return end
+  return ffi.string(value)
+end
+
+end
+
 end
 
 -- zmq_z85_encode, zmq_z85_decode
 if pget(libzmq3, "zmq_z85_encode") then
 
 -- we alloc buffers for CURVE encoded key size
-local TMP_BUF_SIZE = 41
-
-local function alloc_z85_buff(len)
-  if len <= TMP_BUF_SIZE then
-    if not tmp_buf then
-      tmp_buf = ffi.new(vla_char_t, TMP_BUF_SIZE)
-    end
-    return tmp_buf
-  end
-  return ffi.new(vla_char_t, len)
-end
+local alloc_z85_buff = create_tmp_allocator(41)
 
 function _M.zmq_z85_encode(data)
   local len = math.floor(#data * 1.25 + 1.0001)
@@ -543,7 +619,7 @@ if pget(libzmq3, "zmq_curve_keypair") then
 function _M.zmq_curve_keypair(as_binary)
   local public_key = ffi.new(vla_char_t, 41)
   local secret_key = ffi.new(vla_char_t, 41)
-  local rc = libzmq3.zmq_curve_keypair(public_key, secret_key)
+  local ret = libzmq3.zmq_curve_keypair(public_key, secret_key)
   if ret == -1 then return -1 end
   if not as_binary then
     return ffi.string(public_key, 40), ffi.string(secret_key, 40)
@@ -565,7 +641,7 @@ do
 local msg = ffi.new(zmq_msg_t)
 
 if ZMQ_VERSION_MAJOR == 3 then
-  ffi.cdef([[
+  local header = [[
     typedef struct {
         int event;
         union {
@@ -611,7 +687,8 @@ if ZMQ_VERSION_MAJOR == 3 then
         } disconnected;
         } data;
     } zmq_event_t;
-  ]])
+  ]]
+  ffi.cdef(header)
   local zmq_event_t = ffi.typeof("zmq_event_t")
   local event_size  = ffi.sizeof(zmq_event_t)
   local event = ffi.new(zmq_event_t)
@@ -640,14 +717,6 @@ if ZMQ_VERSION_MAJOR == 3 then
   end
 
 else
-  ffi.cdef([[
-    typedef struct {
-        uint16_t event;
-        int32_t  value;
-    } zmq_event_t;
-  ]])
-  local zmq_event_t  = ffi.typeof("zmq_event_t")
-  local event_size   = ffi.sizeof(zmq_event_t)
   local event        = ffi.new(auint16_t)
   local value        = ffi.new(aint32_t)
 
@@ -710,63 +779,103 @@ end
 
 do -- const
 
-_M.CONTEXT_OPTIONS = {
+local unpack = unpack or table.unpack
+
+local function O(opt)
+  local t = {}
+  for k, v in pairs(opt) do
+    if type(k) == "string" then
+      t[k] = v
+    elseif is_zmq_ge(unpack(k)) then
+      for name, val in pairs(v) do
+        t[name] = val
+      end
+    end
+  end
+  return t
+end
+
+_M.CONTEXT_OPTIONS = O{
   ZMQ_IO_THREADS  = 1;
   ZMQ_MAX_SOCKETS = 2;
+  [{4,1,0}] = {
+    ZMQ_SOCKET_LIMIT        = 3;
+    ZMQ_THREAD_PRIORITY     = 3;
+    ZMQ_THREAD_SCHED_POLICY = 4;
+  };
 }
 
-_M.SOCKET_OPTIONS = {
-  ZMQ_AFFINITY                = {4 , "RW", "u64"};
-  ZMQ_IDENTITY                = {5 , "RW", "str"}; 
-  ZMQ_SUBSCRIBE               = {6 , "WO", "str_arr"};
-  ZMQ_UNSUBSCRIBE             = {7 , "WO", "str_arr"};
-  ZMQ_RATE                    = {8 , "RW", "int"};
-  ZMQ_RECOVERY_IVL            = {9 , "RW", "int"};
-  ZMQ_SNDBUF                  = {11, "RW", "int"};
-  ZMQ_RCVBUF                  = {12, "RW", "int"};
-  ZMQ_RCVMORE                 = {13, "RO", "int"};
-  ZMQ_FD                      = {14, "RO", "fdt"};
-  ZMQ_EVENTS                  = {15, "RO", "int"};
-  ZMQ_TYPE                    = {16, "RO", "int"};
-  ZMQ_LINGER                  = {17, "RW", "int"};
-  ZMQ_RECONNECT_IVL           = {18, "RW", "int"};
-  ZMQ_BACKLOG                 = {19, "RW", "int"};
-  ZMQ_RECONNECT_IVL_MAX       = {21, "RW", "int"};
-  ZMQ_MAXMSGSIZE              = {22, "RW", "i64"};
-  ZMQ_SNDHWM                  = {23, "RW", "int"};
-  ZMQ_RCVHWM                  = {24, "RW", "int"};
-  ZMQ_MULTICAST_HOPS          = {25, "RW", "int"};
-  ZMQ_RCVTIMEO                = {27, "RW", "int"};
-  ZMQ_SNDTIMEO                = {28, "RW", "int"};
-  ZMQ_IPV4ONLY                = {31, "RW", "int"};
-  ZMQ_LAST_ENDPOINT           = {32, "RO", "str"};
-  ZMQ_ROUTER_MANDATORY        = {33, "WO", "int"};
-  ZMQ_TCP_KEEPALIVE           = {34, "RW", "int"};
-  ZMQ_TCP_KEEPALIVE_CNT       = {35, "RW", "int"};
-  ZMQ_TCP_KEEPALIVE_IDLE      = {36, "RW", "int"};
-  ZMQ_TCP_KEEPALIVE_INTVL     = {37, "RW", "int"};
-  ZMQ_TCP_ACCEPT_FILTER       = {38, "WO", "str_arr"};
-  ZMQ_DELAY_ATTACH_ON_CONNECT = {39, "RW", "int"};
-  ZMQ_IMMEDIATE               = {39, "RW", "int"};
-  ZMQ_XPUB_VERBOSE            = {40, "RW", "int"};
-  ZMQ_ROUTER_RAW              = {41, "RW", "int"};
-  ZMQ_IPV6                    = {42, "RW", "int"},
-  ZMQ_MECHANISM               = {43, "RO", "int"},
-  ZMQ_PLAIN_SERVER            = {44, "RW", "int"},
-  ZMQ_PLAIN_USERNAME          = {45, "RW", "str"},
-  ZMQ_PLAIN_PASSWORD          = {46, "RW", "str"},
-  ZMQ_CURVE_SERVER            = {47, "RW", "int"},
-  ZMQ_CURVE_PUBLICKEY         = {48, "RW", "str"},
-  ZMQ_CURVE_SECRETKEY         = {49, "RW", "str"},
-  ZMQ_CURVE_SERVERKEY         = {50, "RW", "str"},
-  ZMQ_PROBE_ROUTER            = {51, "WO", "int"},
-  ZMQ_REQ_CORRELATE           = {52, "WO", "int"},
-  ZMQ_REQ_RELAXED             = {53, "WO", "int"},
-  ZMQ_CONFLATE                = {54, "WO", "int"},
-  ZMQ_ZAP_DOMAIN              = {55, "RW", "str"},
+_M.SOCKET_OPTIONS = O{
+  ZMQ_AFFINITY                  = {4 , "RW", "u64"};
+  ZMQ_IDENTITY                  = {5 , "RW", "str"}; 
+  ZMQ_SUBSCRIBE                 = {6 , "WO", "str_arr"};
+  ZMQ_UNSUBSCRIBE               = {7 , "WO", "str_arr"};
+  ZMQ_RATE                      = {8 , "RW", "int"};
+  ZMQ_RECOVERY_IVL              = {9 , "RW", "int"};
+  ZMQ_SNDBUF                    = {11, "RW", "int"};
+  ZMQ_RCVBUF                    = {12, "RW", "int"};
+  ZMQ_RCVMORE                   = {13, "RO", "int"};
+  ZMQ_FD                        = {14, "RO", "fdt"};
+  ZMQ_EVENTS                    = {15, "RO", "int"};
+  ZMQ_TYPE                      = {16, "RO", "int"};
+  ZMQ_LINGER                    = {17, "RW", "int"};
+  ZMQ_RECONNECT_IVL             = {18, "RW", "int"};
+  ZMQ_BACKLOG                   = {19, "RW", "int"};
+  ZMQ_RECONNECT_IVL_MAX         = {21, "RW", "int"};
+  ZMQ_MAXMSGSIZE                = {22, "RW", "i64"};
+  ZMQ_SNDHWM                    = {23, "RW", "int"};
+  ZMQ_RCVHWM                    = {24, "RW", "int"};
+  ZMQ_MULTICAST_HOPS            = {25, "RW", "int"};
+  ZMQ_RCVTIMEO                  = {27, "RW", "int"};
+  ZMQ_SNDTIMEO                  = {28, "RW", "int"};
+  ZMQ_IPV4ONLY                  = {31, "RW", "int"};
+  ZMQ_LAST_ENDPOINT             = {32, "RO", "str"};
+  ZMQ_ROUTER_MANDATORY          = {33, "WO", "int"};
+  ZMQ_TCP_KEEPALIVE             = {34, "RW", "int"};
+  ZMQ_TCP_KEEPALIVE_CNT         = {35, "RW", "int"};
+  ZMQ_TCP_KEEPALIVE_IDLE        = {36, "RW", "int"};
+  ZMQ_TCP_KEEPALIVE_INTVL       = {37, "RW", "int"};
+  ZMQ_TCP_ACCEPT_FILTER         = {38, "WO", "str_arr"};
+  ZMQ_DELAY_ATTACH_ON_CONNECT   = {39, "RW", "int"};
+  ZMQ_IMMEDIATE                 = {39, "RW", "int"};
+  ZMQ_XPUB_VERBOSE              = {40, "RW", "int"};
+
+  [{4,0,0}] = {
+    ZMQ_ROUTER_RAW              = {41, "RW", "int"};
+    ZMQ_IPV6                    = {42, "RW", "int"},
+    ZMQ_MECHANISM               = {43, "RO", "int"},
+    ZMQ_PLAIN_SERVER            = {44, "RW", "int"},
+    ZMQ_PLAIN_USERNAME          = {45, "RW", "str"},
+    ZMQ_PLAIN_PASSWORD          = {46, "RW", "str"},
+    ZMQ_CURVE_SERVER            = {47, "RW", "int"},
+    ZMQ_CURVE_PUBLICKEY         = {48, "RW", "str"},
+    ZMQ_CURVE_SECRETKEY         = {49, "RW", "str"},
+    ZMQ_CURVE_SERVERKEY         = {50, "RW", "str"},
+    ZMQ_PROBE_ROUTER            = {51, "WO", "int"},
+    ZMQ_REQ_CORRELATE           = {52, "WO", "int"},
+    ZMQ_REQ_RELAXED             = {53, "WO", "int"},
+    ZMQ_CONFLATE                = {54, "WO", "int"},
+    ZMQ_ZAP_DOMAIN              = {55, "RW", "str"},
+  };
+
+  [{4,1,0}] = {
+    ZMQ_ROUTER_HANDOVER           = {56, "WO", "int"},
+    ZMQ_TOS                       = {57, "RW", "int"},
+    ZMQ_IPC_FILTER_PID            = {58, "WO", "int"}, --@fixme use pid_t
+    ZMQ_IPC_FILTER_UID            = {59, "WO", "int"}, --@fixme use uid_t
+    ZMQ_IPC_FILTER_GID            = {60, "WO", "int"}, --@fixme use gid_t
+    ZMQ_CONNECT_RID               = {61, "WO", "str"},
+    ZMQ_GSSAPI_SERVER             = {62, "RW", "int"},
+    ZMQ_GSSAPI_PRINCIPAL          = {63, "RW", "str"},
+    ZMQ_GSSAPI_SERVICE_PRINCIPAL  = {64, "RW", "str"},
+    ZMQ_GSSAPI_PLAINTEXT          = {65, "RW", "str"},
+    ZMQ_HANDSHAKE_IVL             = {66, "RW", "int"},
+    ZMQ_IDENTITY_FD               = {67, "RO", "fdt"},
+    ZMQ_SOCKS_PROXY               = {68, "RW", "str"},
+  };
 }
 
-_M.SOCKET_TYPES = {
+_M.SOCKET_TYPES = O{
   ZMQ_PAIR   = 0;
   ZMQ_PUB    = 1;
   ZMQ_SUB    = 2;
@@ -778,6 +887,9 @@ _M.SOCKET_TYPES = {
   ZMQ_PUSH   = 8;
   ZMQ_XPUB   = 9;
   ZMQ_XSUB   = 10;
+  [{4,0,0}]  = {
+    ZMQ_STREAM = 11;
+  };
 }
 
 _M.FLAGS = {
@@ -800,7 +912,7 @@ _M.SECURITY_MECHANISM = {
  ZMQ_CURVE = 2;
 }
 
-_M.EVENTS = {
+_M.EVENTS = O{
   ZMQ_EVENT_CONNECTED        = 1;
   ZMQ_EVENT_CONNECT_DELAYED  = 2;
   ZMQ_EVENT_CONNECT_RETRIED  = 4;
@@ -811,11 +923,10 @@ _M.EVENTS = {
   ZMQ_EVENT_CLOSED           = 128;
   ZMQ_EVENT_CLOSE_FAILED     = 256;
   ZMQ_EVENT_DISCONNECTED     = 512;
+  [{4,0,0}] = {
+    ZMQ_EVENT_MONITOR_STOPPED  = 1024;
+  };
 }
-
-if ZMQ_VERSION_MAJOR >= 4 then
-  _M.EVENTS.ZMQ_EVENT_MONITOR_STOPPED = 1024
-end
 
 do local ZMQ_EVENT_ALL = 0
 for _, v in pairs(_M.EVENTS) do

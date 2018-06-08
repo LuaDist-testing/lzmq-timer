@@ -1,3 +1,5 @@
+pcall(require, "luacov")
+
 local function zversion(zmq)
   local version = zmq.version()
   return string.format("%d.%d.%d", version[1], version[2], version[3])
@@ -85,9 +87,11 @@ local function wait(ms)
   ztimer.sleep(ms or 100)
 end
 
+local ENABLE = true
+
 local ECHO_ADDR = "inproc://echo"
 
-local _ENV = TEST_CASE'interface'            if true then
+local _ENV = TEST_CASE'interface'            if ENABLE then
 
 function setup() end
 
@@ -234,7 +238,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'ctx/skt interface'    if true then
+local _ENV = TEST_CASE'ctx/skt interface'    if ENABLE then
 
 local ctx, skt
 
@@ -277,6 +281,10 @@ function test_socket()
   assert_function(skt.send)
   assert_function(skt.send_msg)
   assert_function(skt.send_more)
+  assert_function(skt.sendx)
+  assert_function(skt.sendx_more)
+  assert_function(skt.sendv)
+  assert_function(skt.sendv_more)
   assert_function(skt.recv)
   assert_function(skt.recv_msg)
   assert_function(skt.recv_new_msg)
@@ -425,6 +433,108 @@ function test_socket_options2_ctor()
   assert_equal(123, skt:get_linger())
 end
 
+function test_socket_ctor_byname()
+  assert_true(skt:close())
+
+  skt = assert(is_zsocket(ctx:socket( "PAIR"   )))
+  assert_equal(zmq.PAIR, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "PUB"    )))
+  assert_equal(zmq.PUB, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "SUB"    )))
+  assert_equal(zmq.SUB, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "REQ"    )))
+  assert_equal(zmq.REQ, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "REP"    )))
+  assert_equal(zmq.REP, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "DEALER" )))
+  assert_equal(zmq.DEALER, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "ROUTER" )))
+  assert_equal(zmq.ROUTER, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "PULL"   )))
+  assert_equal(zmq.PULL, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "PUSH"   )))
+  assert_equal(zmq.PUSH, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "XPUB"   )))
+  assert_equal(zmq.XPUB, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket( "XSUB"   )))
+  assert_equal(zmq.XSUB, skt:type())
+  skt:close()
+  if zmq.STREAM then
+    skt = assert(is_zsocket(ctx:socket( "STREAM" )))
+    assert_equal(zmq.STREAM, skt:type())
+    skt:close()
+  end
+
+  assert_error(function() skt = ctx:socket( "pair" ) end)
+end
+
+function test_socket_ctor_byname2()
+  assert_true(skt:close())
+
+  skt = assert(is_zsocket(ctx:socket{ "PAIR"   }))
+  assert_equal(zmq.PAIR, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "PUB"    }))
+  assert_equal(zmq.PUB, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "SUB"    }))
+  assert_equal(zmq.SUB, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "REQ"    }))
+  assert_equal(zmq.REQ, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "REP"    }))
+  assert_equal(zmq.REP, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "DEALER" }))
+  assert_equal(zmq.DEALER, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "ROUTER" }))
+  assert_equal(zmq.ROUTER, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "PULL"   }))
+  assert_equal(zmq.PULL, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "PUSH"   }))
+  assert_equal(zmq.PUSH, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "XPUB"   }))
+  assert_equal(zmq.XPUB, skt:type())
+  skt:close()
+  skt = assert(is_zsocket(ctx:socket{ "XSUB"   }))
+  assert_equal(zmq.XSUB, skt:type())
+  skt:close()
+  if zmq.STREAM then
+    skt = assert(is_zsocket(ctx:socket{ "STREAM" }))
+    assert_equal(zmq.STREAM, skt:type())
+    skt:close()
+  end
+
+  assert_error(function() skt = ctx:socket{ "pair" } end)
+end
+
+function test_socket_on_close()
+  skt = assert(is_zsocket(ctx:socket(zmq.SUB)))
+  local flag = false
+  skt:on_close(function(...)
+    flag = true
+    assert_equal(0, select('#', ...))
+  end)
+  assert_false(flag)
+  skt:close()
+  assert_true(flag)
+end
+
 function test_context_options()
   assert_true(ctx:set_io_threads(2))
   assert_equal(2, ctx:get_io_threads())
@@ -434,7 +544,7 @@ function test_context_options()
   local ptr = assert(is_zcontext_ud(ctx:lightuserdata()))
   local ctx2 = assert(is_zcontext(zmq.init_ctx(ptr)))
   assert_not_equal(ctx, ctx2)
-  -- assert_not_equal(ptr, ctx2:lightuserdata())
+  assert_equal(ptr, ctx2:lightuserdata())
   assert_equal(ctx:get_io_threads(),  ctx2:get_io_threads() )
   assert_equal(ctx:get_max_sockets(), ctx2:get_max_sockets())
 
@@ -474,7 +584,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'context'              if true then
+local _ENV = TEST_CASE'context'              if ENABLE then
 
 local ctx, skt
 
@@ -529,7 +639,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'socket autoclose'     if true then
+local _ENV = TEST_CASE'socket autoclose'     if ENABLE then
 
 local ctx, skt
 
@@ -594,7 +704,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'message'              if true then
+local _ENV = TEST_CASE'message'              if ENABLE then
 
 local msg
 
@@ -755,7 +865,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'bind/connect'         if true then
+local _ENV = TEST_CASE'bind/connect'         if ENABLE then
 
 local ctx, pub, sub1, sub2, sub3, msg
 
@@ -875,7 +985,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'bind/connect on ctor' if true then
+local _ENV = TEST_CASE'bind/connect on ctor' if ENABLE then
 
 local ctx, pub, sub, msg
 
@@ -928,7 +1038,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'Send Recv'            if true then
+local _ENV = TEST_CASE'Send Recv'            if ENABLE then
 
 local ctx, pub, sub, msg
 
@@ -1065,12 +1175,38 @@ function test_recv_all()
   assert_equal('hello, world', table.concat(t))
 end
 
+function test_recv_flags()
+  sub:set_rcvtimeo(10000)
+  local timer = assert(ztimer.monotonic():start())
+  local ok, err = sub:recv(zmq.DONTWAIT)
+  local elapsed = timer:stop()
+  assert_nil(ok)
+  assert(error_is(err, zmq.errors.EAGAIN))
+  assert(elapsed < 100)
+end
+
+function test_recv_all_flags()
+  sub:set_rcvtimeo(10000)
+  local timer = assert(ztimer.monotonic():start())
+  local ok, err = sub:recv_all(zmq.DONTWAIT)
+  local elapsed = timer:stop()
+  assert_nil(ok)
+  assert(error_is(err, zmq.errors.EAGAIN))
+  assert(elapsed < 100)
+end
+
 function test_sendx()
   assert_true(pub:sendx('hello', ', ', 'world'))
   local a,b,c = assert_string(sub:recvx())
   assert_string(b)
   assert_string(c)
   assert_equal('hello, world', a .. b .. c)
+end
+
+function test_sendv()
+  assert_true(pub:sendv('hello', ', ', 'world'))
+  local msg = assert_string(sub:recv())
+  assert_equal('hello, world', msg)
 end
 
 function test_sendx_more()
@@ -1123,7 +1259,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'socket poll'          if true then
+local _ENV = TEST_CASE'socket poll'          if ENABLE then
 
 local ctx, req, rep, timer
 
@@ -1153,19 +1289,26 @@ end
 
 end
 
-local _ENV = TEST_CASE'loop'                 if true then
+local _ENV = TEST_CASE'loop'                 if ENABLE then
 
-local loop, timer
+local ctx, loop, timer
 
 function setup()
-  loop  = assert(zloop.new())
+  ctx   = assert(zmq.context())
+  loop  = assert(zloop.new(ctx))
   timer = ztimer.monotonic()
 end
 
 function teardown()
   loop:destroy()
+  assert_equal(socket_count(ctx, 0))
+  ctx:destroy()
   timer:close()
   wait(500) -- for TCP time to release IP address
+end
+
+function test_context()
+  assert_equal(ctx, loop:context())
 end
 
 function test_sleep()
@@ -1284,7 +1427,7 @@ function test_echo()
 
   timer:start()
   loop:start()
-  assert_true(ge(2000, timer:stop()))
+  assert_true(ge(1990, timer:stop()))
   assert_true(counter > 3)
 
   loop:destroy()
@@ -1292,9 +1435,22 @@ function test_echo()
   assert_true(cli:closed())
 end
 
+function test_autoclose_true()
+  local cli = assert(loop:add_new_socket(zmq.REQ, function() end))
+  loop:destroy(false)
+  assert_true(cli:closed())
 end
 
-local _ENV = TEST_CASE'timer'                if true then
+function test_autoclose_false()
+  local cli = assert(loop:add_new_socket(zmq.REQ, function() end))
+  loop:destroy(true)
+  assert_false(cli:closed())
+  cli:close()
+end
+
+end
+
+local _ENV = TEST_CASE'timer'                if ENABLE then
 
 local timer
 
@@ -1407,7 +1563,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'poller'               if true then
+local _ENV = TEST_CASE'poller'               if ENABLE then
 local ctx, pub, sub1, sub2, sub3, msg
 local poller
 local names
@@ -1513,9 +1669,44 @@ function test_remove_on_poll()
   ret = t[sub3] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
 end
 
+function test_pollable_interface()
+  local function wrap(s)
+    return {
+      socket = function (self) return s        end;
+      recv   = function (self) return s:recv() end;
+    }
+  end
+
+  local sub1 = wrap(sub1)
+  local sub2 = wrap(sub2)
+  local sub3 = wrap(sub3)
+
+  local t = {}
+  poller:add(sub1, zmq.POLLIN, function(skt) assert_equal(sub1, skt, " expect socket `sub1` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+  poller:add(sub2, zmq.POLLIN, function(skt) assert_equal(sub2, skt, " expect socket `sub2` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+  poller:add(sub3, zmq.POLLIN, function(skt) assert_equal(sub3, skt, " expect socket `sub3` got `" .. (names[skt] or tostring(skt))) t[skt] = {skt:recv()} end)
+
+  assert_true(pub:send("hello"))
+
+  assert_equal(3, poller:poll(100))
+  local ret
+  ret = t[sub1] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub2] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub3] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+
+  poller:remove(sub2)
+
+  assert_true(pub:send("hello"))
+
+  assert_equal(2, poller:poll(100))
+
+  ret = t[sub1] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
+  ret = t[sub3] assert_table(ret) assert_equal("hello", ret[1]) assert_equal(false, ret[2])
 end
 
-local _ENV = TEST_CASE'z85 encode'           if true then
+end
+
+local _ENV = TEST_CASE'z85 encode'           if ENABLE then
 if not zmq.z85_encode then test = SKIP"zmq_z85_encode does not support" else
 
 local key_bin = "\084\252\186\036\233\050\073\150\147\022\251\097\124\135\043\176" ..
@@ -1570,7 +1761,7 @@ end
 end
 end
 
-local _ENV = TEST_CASE'curve keypair'        if true then
+local _ENV = TEST_CASE'curve keypair'        if ENABLE then
 if not zmq.curve_keypair then test = SKIP"zmq_curve_keypair does not support" else
 
 function test_generate_z85()
@@ -1600,17 +1791,22 @@ end
 end
 end
 
-local _ENV = TEST_CASE'monitor'              if true then
+local _ENV = TEST_CASE'monitor'              if ENABLE then
 
-local loop, timer
+local ctx, loop, timer, srv, mon
 
 function setup()
-  loop  = assert(zloop.new())
+  ctx   = assert(zmq.context())
+  loop  = assert(zloop.new(ctx))
   timer = ztimer.monotonic()
 end
 
 function teardown()
+  if srv then srv:close() end
+  if mon then mon:close() end
   loop:destroy()
+  assert_equal(socket_count(ctx, 0))
+  ctx:destroy()
   wait(500) -- for TCP time to release IP address
 end
 
@@ -1680,7 +1876,7 @@ function test_monitor()
 end
 
 function test_monitor_with_addr()
-  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
   if not srv.monitor then
     return skip("this version of LZMQ does not support socket monitor")
   end
@@ -1690,7 +1886,7 @@ function test_monitor_with_addr()
 end
 
 function test_monitor_with_wrong_addr()
-  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
   if not srv.monitor then
     return skip("this version of LZMQ does not support socket monitor")
   end
@@ -1702,7 +1898,7 @@ function test_monitor_with_wrong_addr()
 end
 
 function test_monitor_without_addr()
-  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
   if not srv.monitor then
     return skip("this version of LZMQ does not support socket monitor")
   end
@@ -1711,7 +1907,7 @@ function test_monitor_without_addr()
 end
 
 function test_monitor_without_addr_with_event()
-  local srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
+  srv = assert(is_zsocket(loop:create_socket(zmq.REP)))
   if not srv.monitor then
     return skip("this version of LZMQ does not support socket monitor")
   end
@@ -1719,10 +1915,49 @@ function test_monitor_without_addr_with_event()
   assert_match("^inproc://lzmq%.monitor%.[0-9a-fA-FxX]+$", srv:monitor(1))
 end
 
+function test_reset_monitor()
+  srv = assert(is_zsocket(loop:create_socket{zmq.REP,
+    linger = 0, sndtimeo = 100, rcvtimeo = 100;
+    bind = {
+      "inproc://test.zmq";
+      "tcp://*:9000";
+    }
+  }))
+
+  if not srv.reset_monitor then
+    return skip("this version of LZMQ does not support socket reset_monitor")
+  end
+
+  mon = assert(is_zsocket(loop:create_socket{zmq.PAIR, 
+    linger = 0, sndtimeo = 100, rcvtimeo = 100;
+    connect = assert(srv:monitor());
+  }))
+
+  srv:bind_to_random_port("tcp://127.0.0.1")
+  ztimer.sleep(500)
+
+  local ev, info = assert_number(mon:recv_event())
+  assert_equal(zmq.EVENT_LISTENING, ev)
+
+  assert(srv:reset_monitor())
+  if zmq.version(true) >= 4 then
+    local ev = assert_number(mon:recv_event())
+    assert_equal(zmq.EVENT_MONITOR_STOPPED, ev)
+  else
+    local ev, err = assert_nil(mon:recv_event())
+    assert(error_is(err, zmq.errors.EAGAIN))
+  end
+
+  srv:bind_to_random_port("tcp://127.0.0.1")
+  ztimer.sleep(500)
+
+  local ev, err = assert_nil(mon:recv_event())
+  assert(error_is(err, zmq.errors.EAGAIN))
+end
 
 end
 
-local _ENV = TEST_CASE'Clone socket'         if true then
+local _ENV = TEST_CASE'Clone socket'         if ENABLE then
 
 local ctx, rep, s1, s2
 
@@ -1814,7 +2049,7 @@ end
 
 end
 
-local _ENV = TEST_CASE'Recv event'           if true then
+local _ENV = TEST_CASE'Recv event'           if ENABLE then
 
 local ctx, skt, mon
 local timeout, epselon = 1500, 490
@@ -1843,6 +2078,62 @@ function test()
   assert_nil( mon:recv_event(zmq.DONTWAIT) )
   elapsed = timer:stop()
   assert(elapsed < (epselon), "Expeted less then " .. epselon .. " got: " .. elapsed)
+end
+
+end
+
+local _ENV = TEST_CASE'Socket optinos'       if ENABLE then
+
+local ctx, srv, cli
+
+function setup()
+  ctx = assert(is_zcontext(zmq.context()))
+  srv = assert(is_zsocket(ctx:socket{zmq.ROUTER, linger = 0}))
+  local port = assert_number(srv:bind_to_random_port("tcp://127.0.0.1"))
+  cli = assert(is_zsocket(ctx:socket{zmq.REQ, connect = "tcp://127.0.0.1:" .. port, linger = 0}))
+end
+
+function teardown()
+  ctx:destroy()
+end
+
+function test_identity_fd()
+  if not srv.identity_fd then
+    return skip("ZMQ_IDENTITY_FD support since ZMQ 4.1.0")
+  end
+
+  assert_number(cli:fd())
+  assert_error(function() srv:identity_fd() end)
+
+  cli:send("hello")
+  local id, empty, msg = assert_string(srv:recvx())
+
+  assert_equal("", empty)
+  assert_equal("hello", msg)
+
+  assert_number(srv:identity_fd(id))
+end
+
+function test_has_event()
+  assert_false(cli:has_event(zmq.POLLIN))
+  assert_true(cli:has_event(zmq.POLLOUT))
+  local _, event = assert_false(cli:has_event(zmq.POLLIN, zmq.POLLOUT))
+  assert_true(event)
+
+  assert_true(cli:send("hello"))
+
+  wait(100)
+
+  assert_false(cli:has_event(zmq.POLLIN))
+  assert_false(cli:has_event(zmq.POLLOUT))
+
+  local msg = assert_table(srv:recv_all())
+  assert_true(srv:send_all(msg))
+
+  wait(100)
+
+  assert_true(cli:has_event(zmq.POLLIN))
+  assert_false(cli:has_event(zmq.POLLOUT))
 end
 
 end

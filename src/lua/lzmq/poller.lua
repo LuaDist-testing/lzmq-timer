@@ -34,16 +34,21 @@ local Poller = zmq.poller
 local poller_mt = {}
 poller_mt.__index = poller_mt
 
+local function raw_socket(sock)
+	return (type(sock) == 'table') and (sock.socket) and sock:socket() or sock
+end
+
 function poller_mt:add(sock, events, cb)
 	assert(cb ~= nil)
-	local id = self.poller:add(sock, events)
+	local s = raw_socket(sock)
+	local id = self.poller:add(s, events)
 	self.callbacks[id] = function(revents) return cb(sock, revents) end
 end
 
 function poller_mt:modify(sock, events, cb)
 	local id
 	if events ~= 0 and cb then
-		id = self.poller:modify(sock, events)
+		id = self.poller:modify(raw_socket(sock), events)
 		self.callbacks[id] = function(revents) return cb(sock, revents) end
 	else
 		self:remove(sock)
@@ -51,7 +56,7 @@ function poller_mt:modify(sock, events, cb)
 end
 
 function poller_mt:remove(sock)
-	local id = self.poller:remove(sock)
+	local id = self.poller:remove(raw_socket(sock))
 	assert(id <= #self.callbacks)
 	for i = id, #self.callbacks do
 		self.callbacks[i] = self.callbacks[i+1]
@@ -75,7 +80,7 @@ end
 function poller_mt:start()
 	self.is_running = true
 	while self.is_running do
-		status, err = self:poll(-1)
+		local status, err = self:poll(-1)
 		if not status then
 			return false, err
 		end

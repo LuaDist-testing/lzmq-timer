@@ -1,8 +1,24 @@
+/*
+  Author: Alexey Melnichuk <mimir@newmail.ru>
+
+  Copyright (C) 2013-2014 Alexey Melnichuk <mimir@newmail.ru>
+
+  Licensed according to the included 'LICENCE' document
+
+  This file is part of lua-lzqm library.
+ */
+
 #include "zcontext.h"
 #include "lzutils.h"
 #include "lzmq.h"
 #include <assert.h>
 #include "zsupport.h"
+
+#if ZMQ_VERSION < ZMQ_MAKE_VERSION(4,0,0)
+#  define LUAZMQ_CTX_DESTROY zmq_ctx_destroy
+#else
+#  define LUAZMQ_CTX_DESTROY zmq_ctx_term
+#endif
 
 // apply options for object on top of stack
 // if set option fail call destroy method for object and return error
@@ -96,10 +112,11 @@ int luazmq_context_init (lua_State *L) {
 }
 
 int luazmq_init_ctx (lua_State *L) {
-  zcontext *src_ctx = (zcontext *)lua_touserdata(L,1);
+  void *src_ctx = lua_touserdata(L,1);
+  luaL_argcheck(L, lua_islightuserdata(L,1), 1, "You must provide zmq context as lightuserdata");
   if(src_ctx){
     zcontext *zctx = luazmq_newudata(L, zcontext, LUAZMQ_CONTEXT);
-    zctx->ctx = src_ctx->ctx;
+    zctx->ctx = src_ctx;
     zctx->flags = LUAZMQ_FLAG_DONT_DESTROY;
     zctx->autoclose_ref = LUA_NOREF;
 
@@ -115,7 +132,7 @@ int luazmq_init_ctx (lua_State *L) {
 
 static int luazmq_ctx_lightuserdata(lua_State *L) {
   zcontext *zctx = luazmq_getcontext(L);
-  lua_pushlightuserdata(L, zctx);
+  lua_pushlightuserdata(L, zctx->ctx);
   return 1;
 }
 
@@ -186,6 +203,9 @@ static int luazmq_ctx_close_sockets (lua_State *L, zcontext *ctx, int linger){
     call_socket_destroy(L, linger);
   }
 
+  luaL_unref(L, LUAZMQ_LUA_REGISTRY, ctx->autoclose_ref);
+  ctx->autoclose_ref = LUA_NOREF;
+
   return 0;
 }
 
@@ -227,7 +247,7 @@ static int luazmq_ctx_destroy (lua_State *L) {
   if(!(ctx->flags & LUAZMQ_FLAG_CLOSED)){
     luazmq_ctx_close_sockets(L, ctx, luaL_optint(L, 2, -2));
     if(!(ctx->flags & LUAZMQ_FLAG_DONT_DESTROY)){
-      int ret = zmq_ctx_destroy(ctx->ctx);
+      int ret = LUAZMQ_CTX_DESTROY(ctx->ctx);
       if(ret == -1)return luazmq_fail(L,NULL);
     }
     ctx->flags |= LUAZMQ_FLAG_CLOSED;
@@ -243,12 +263,41 @@ static int luazmq_ctx_closed (lua_State *L) {
 }
 
 static int socket_type(lua_State *L, int pos){
+  static const char* NAMES[] = {
+    "PAIR", "PUB", "SUB", "REQ", "REP",
+    "DEALER", "ROUTER", "PULL", "PUSH", 
+    "XPUB", "XSUB",
+#ifdef ZMQ_STREAM
+    "STREAM",
+#endif
+
+    NULL
+  };
+
+  static int TYPES[] = {
+   ZMQ_PAIR, ZMQ_PUB, ZMQ_SUB, ZMQ_REQ,
+   ZMQ_REP, ZMQ_DEALER, ZMQ_ROUTER, ZMQ_PULL,
+   ZMQ_PUSH, ZMQ_XPUB, ZMQ_XSUB,
+#ifdef ZMQ_STREAM
+    ZMQ_STREAM,
+#endif
+  };
+
   if(lua_isnumber(L, pos))
     return lua_tonumber(L, pos);
+
+  if(lua_isstring(L, pos))
+    return TYPES[luaL_checkoption(L, pos, NULL, NAMES)];
+
   if(lua_istable(L, pos)){
     lua_rawgeti(L, pos, 1);
     if(lua_isnumber(L, -1)){
       int n = lua_tonumber(L, -1);
+      lua_pop(L, 1);
+      return n;
+    }
+    if(lua_isstring(L, -1)){
+      int n = TYPES[luaL_checkoption(L, -1, NULL, NAMES)];
       lua_pop(L, 1);
       return n;
     }

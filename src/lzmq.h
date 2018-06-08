@@ -1,3 +1,13 @@
+/*
+  Author: Alexey Melnichuk <mimir@newmail.ru>
+
+  Copyright (C) 2013-2014 Alexey Melnichuk <mimir@newmail.ru>
+
+  Licensed according to the included 'LICENCE' document
+
+  This file is part of lua-lzqm library.
+ */
+
 #ifndef _LZMQ_H_
 #define _LZMQ_H_
 #include "lua.h"
@@ -22,14 +32,15 @@
 #  define LZMQ_AUTOCLOSE_SOCKET 1
 #endif
 
-#define LUAZMQ_PREFIX  "LuaZMQ3: "
+#define LUAZMQ_PREFIX  "LuaZMQ: "
 
 typedef unsigned char uchar;
-#define LUAZMQ_FLAG_CLOSED       (uchar)(0x01 << 0)
+#define LUAZMQ_FLAG_CLOSED         (uchar)(0x01 << 0)
 /*context only*/
-#define LUAZMQ_FLAG_CTX_SHUTDOWN (uchar)(0x01 << 1)
-#define LUAZMQ_FLAG_DONT_DESTROY (uchar)(0x01 << 2)
-#define LUAZMQ_FLAG_MORE         (uchar)(0x01 << 3)
+#define LUAZMQ_FLAG_CTX_SHUTDOWN   (uchar)(0x01 << 1)
+#define LUAZMQ_FLAG_DONT_DESTROY   (uchar)(0x01 << 2)
+#define LUAZMQ_FLAG_MORE           (uchar)(0x01 << 3)
+#define LUAZMQ_FLAG_CLOSE_ON_ETERM (uchar)(0x01 << 4)
 
 typedef struct{
   void  *ctx;

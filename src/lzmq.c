@@ -1,3 +1,13 @@
+/*
+  Author: Alexey Melnichuk <mimir@newmail.ru>
+
+  Copyright (C) 2013-2014 Alexey Melnichuk <mimir@newmail.ru>
+
+  Licensed according to the included 'LICENCE' document
+
+  This file is part of lua-lzqm library.
+ */
+
 #include "zmq.h"
 #include "zmq_utils.h"
 #include "lzutils.h"
@@ -12,8 +22,8 @@
 #include "zsupport.h"
 
 #define LUAZMQ_VERSION_MAJOR 0
-#define LUAZMQ_VERSION_MINOR 3
-#define LUAZMQ_VERSION_PATCH 5
+#define LUAZMQ_VERSION_MINOR 4
+#define LUAZMQ_VERSION_PATCH 2
 // #define LUAZMQ_VERSION_COMMENT "dev"
 
 const char *LUAZMQ_CONTEXT = LUAZMQ_PREFIX "Context";
@@ -68,15 +78,20 @@ int luazmq_pass(lua_State *L){
 
 static int luazmq_geterrno(lua_State *L, zsocket *skt){
   int err = zmq_errno();
+  /* After we get ETERM error we can still use this socket
+   * to syncronize between threads. So this make sense to not close it.
+   */
   if(skt && (err == ETERM)){
     if(!(skt->flags & LUAZMQ_FLAG_CLOSED)){
-      /*int ret = */zmq_close(skt->skt);
-      skt->flags |= LUAZMQ_FLAG_CLOSED;
-      luazmq_skt_before_close(L, skt);
+      if(skt->flags & LUAZMQ_FLAG_CLOSE_ON_ETERM){
+        /*int ret = */zmq_close(skt->skt);
+        skt->flags |= LUAZMQ_FLAG_CLOSED;
+        luazmq_skt_before_close(L, skt);
 #if LZMQ_SOCKET_COUNT
-      skt->ctx->socket_count--;
-      assert(skt->ctx->socket_count >= 0);
+        skt->ctx->socket_count--;
+        assert(skt->ctx->socket_count >= 0);
 #endif
+      }
     }
   }
   return err;
@@ -310,6 +325,16 @@ static int luazmq_proxy_steerable(lua_State *L){
 
 #endif
 
+#ifdef ZMQ_HAS_CAPABILITIES
+
+static int luazmq_has(lua_State *L){
+  const char *capability = luaL_checkstring(L,1);
+  lua_pushboolean(L, zmq_has(capability));
+  return 1;
+}
+
+#endif
+
 static int luazmq_error_create_(lua_State *L){
   int err = luaL_checkint(L, 1);
   return luazmq_error_create(L, err);
@@ -421,6 +446,10 @@ static const struct luaL_Reg luazmqlib[]   = {
 
 #ifdef LUAZMQ_SUPPORT_CURVE_KEYPAIR
   { "curve_keypair",  luazmq_curve_keypair    },
+#endif
+
+#ifdef ZMQ_HAS_CAPABILITIES
+  { "has",            luazmq_has              },
 #endif
 
   { "device",         luazmq_device           },

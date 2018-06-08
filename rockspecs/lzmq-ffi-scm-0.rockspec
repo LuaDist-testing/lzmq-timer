@@ -8,13 +8,13 @@ source = {
 
 description = {
   summary = "Lua bindings to ZeroMQ",
-  homepage = "https://github.com/moteus/lzmq",
+  homepage = "https://github.com/zeromq/lzmq",
   license = "MIT/X11",
 }
 
 dependencies = {
-  "lua >= 5.1, < 5.3",
-  -- "lua-llthreads >= 1.2"
+  "lua >= 5.1, < 5.4",
+  -- "lua-llthreads2 >= 0.1.2"
   -- "lzmq-timer"
 }
 

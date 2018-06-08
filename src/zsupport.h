@@ -1,3 +1,13 @@
+/*
+  Author: Alexey Melnichuk <mimir@newmail.ru>
+
+  Copyright (C) 2013-2014 Alexey Melnichuk <mimir@newmail.ru>
+
+  Licensed according to the included 'LICENCE' document
+
+  This file is part of lua-lzqm library.
+ */
+
 #ifndef _ZSUPPORT_H_
 #define _ZSUPPORT_H_
 #include "zmq.h"
@@ -19,8 +29,12 @@
 #  define LUAZMQ_SUPPORT_CURVE_KEYPAIR
 #endif
 
-#if ZMQ_VERSION >= ZMQ_MAKE_VERSION(4,1,0)
+#if ZMQ_VERSION >= ZMQ_MAKE_VERSION(4,0,5)
 #  define LUAZMQ_SUPPORT_PROXY_STEERABLE
+#endif
+
+#if ZMQ_VERSION >= ZMQ_MAKE_VERSION(4,1,0)
+#  define LUAZMQ_SUPPORT_MSG_GETS
 #endif
 
 #endif

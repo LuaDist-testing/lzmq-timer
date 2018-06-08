@@ -484,6 +484,30 @@ function socket:sendx() end
 -- @treturn[2] number index of error part
 function socket:sendx_more() end
 
+--- Send a message over Socket.
+-- This function concatinate all parts and send result string.
+--
+-- @param ... string parts of message.
+-- @return[1] true
+-- @treturn[2] nil
+-- @treturn[2] error
+-- @treturn[2] number index of error part
+--
+-- @usage
+-- skt:sendv("Hello","World")
+function socket:sendv() end
+
+--- Send a message over Socket.
+-- This function concatinate all parts and send result string.
+-- This function always set flag zmq.SNDMORE to message.
+--
+-- @param ... string parts of message.
+-- @return[1] true
+-- @treturn[2] nil
+-- @treturn[2] error
+-- @treturn[2] number index of error part
+function socket:sendv_more() end
+
 --- Receive a message.
 -- 
 -- @tparam[opt=0] number flags zmq receive flags.
@@ -541,7 +565,6 @@ function socket:recv_new_msg  () end
 -- @treturn[2] table received part of message
 function socket:recv_all() end
 
-
 --- This is alias for `socket:recv_all`
 --
 function socket:recv_multipart() end
@@ -575,10 +598,42 @@ function socket:recv_event    () end
 -- @treturn[2] nil
 -- @treturn[2] error
 --
+-- @see socket:reset_monitor
+--
 -- @usage
 -- -- create monitor socket
 -- local mon = ctx:socket{zmq.PAIR, connect = skt:monitor()}
 function socket:monitor       () end
+
+--- Stop publishing socket events.
+--
+-- @treturn[1] boolean
+-- @treturn[2] nil
+-- @treturn[2] error
+--
+-- @see socket:monitor
+function socket:reset_monitor () end
+
+--- Check if socket has specific event state.
+--
+-- @tparam number mask event mask (zmq.POLLIN, zmq.POLLOUT)
+-- @treturn[1] boolean
+-- @treturn[2] nil
+-- @treturn[2] error
+--
+-- @usage
+-- -- Polling zmq socket using libuv (use lua-lluv binding)
+--
+-- -- start polling zmq socket (e.g. ZMQ_SUB)
+-- uv.poll_socket(sock:fd()):start(function(handle, err)
+--   -- We need read all messages from zmq socket
+--   while sock:has_event(zmq.POLLIN) do
+--     local msg, err = sock:recv() -- we have no need use zmq.DONTWAIT
+--     ...
+--   end
+-- end)
+--
+function socket:has_event     () end
 
 end
 

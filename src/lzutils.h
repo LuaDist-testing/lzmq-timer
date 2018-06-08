@@ -1,8 +1,30 @@
+/*
+  Author: Alexey Melnichuk <mimir@newmail.ru>
+
+  Copyright (C) 2013-2014 Alexey Melnichuk <mimir@newmail.ru>
+
+  Licensed according to the included 'LICENCE' document
+
+  This file is part of lua-lzqm library.
+ */
+
 #ifndef _LZUTILS_H_
 #define _LZUTILS_H_
 
 #include "lua.h"
 #include "lauxlib.h"
+
+#if LUA_VERSION_NUM >= 503 /* Lua 5.3 */
+
+#ifndef luaL_optint
+# define luaL_optint luaL_optinteger
+#endif
+
+#ifndef luaL_checkint
+# define luaL_checkint luaL_checkinteger
+#endif
+
+#endif
 
 #if LUA_VERSION_NUM >= 502 
 
@@ -10,7 +32,9 @@
 # define luazmq_rawsetp  lua_rawsetp
 # define luazmq_setfuncs luaL_setfuncs
 # define luazmq_absindex lua_absindex
+#ifndef lua_objlen
 # define lua_objlen      lua_rawlen
+#endif
 
 int   luazmq_typerror (lua_State *L, int narg, const char *tname);
 
